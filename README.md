@@ -17,8 +17,8 @@ python scripts/hw.py grab https://your-course-site/ --course maths --depth 1 --v
 
 It saves into `Downloads/homework-vault/maths/`:
 
-- every page it reaches as plain text (`sources/`), with JavaScript pages loaded in a headless Edge or Chrome
-- linked files from the same site: pdf, pptx, docx, code files (`attachments/files/`)
+- every page it reaches as plain text (`1 Notes/Source files/`), with JavaScript pages loaded in a headless Edge or Chrome
+- linked files from the same site: pdf, pptx, docx, code files (`1 Notes/Source files/files/`)
 - captions for every YouTube link it finds (`--videos`), saved as text
 - `index.md`, a list of everything found and what was saved
 
@@ -34,6 +34,7 @@ The LLM has to read everything it summarises, so a full course uses a lot of tok
 |---|---|
 | One lecture transcript (about 12,000 words) | 16,000 tokens |
 | A course with 18 lectures | 300,000 tokens to read, plus the notes it writes |
+| Reading every lecture-notes file of one course (for example ten PDFs, 393 pages) | 150,000 to 250,000 tokens |
 | One assignment page, hidden sections opened | 20,000 tokens |
 
 Each step also re-reads the whole conversation, so real usage is higher. **A free plan will probably not work for a whole course.** Use a paid plan or API credit, or run one week at a time. The script itself (captions, OCR, PDF, screenshots) is free and runs on your PC. Only the LLM's reading and writing cost tokens.
@@ -50,18 +51,23 @@ This tool helps you organise and understand your own study material. For assignm
 
 1. **Install Python 3.12** from https://www.python.org/downloads/ . On Windows, tick "Add python.exe to PATH" in the installer. Check with `python --version`.
 2. Copy this folder into your agent's skills folder (for Claude Code: `~/.claude/skills/homework-vault/`).
-3. Install the packages: `pip install rapidocr-onnxruntime mss trafilatura lxml_html_clean yt-dlp fpdf2 faster-whisper sounddevice numpy pypdf python-pptx`
+3. Install the packages: `pip install rapidocr-onnxruntime pillow mss trafilatura lxml_html_clean yt-dlp fpdf2 pypdf faster-whisper sounddevice numpy python-pptx`
 4. Optional: set `HW_VAULT` to use another output folder. By default everything goes to `Downloads/homework-vault/<course>/`.
 5. **Only for pages behind a login** (Moodle, Canvas, Blackboard): your agent needs a browser tool that uses your own sign-ins, such as the [Claude in Chrome extension](https://chromewebstore.google.com/detail/fcoeoabgfenejglbffodgkkbkcdhcgfn). Sign in to the site in Chrome first. Public pages, downloads and the `grab` command need no extra tool.
 
-## Layout in the vault
+## What you get
+
+Every course gets one folder, named after the course, in your Downloads folder. It always has three parts:
 
 ```
-<output>/<course>/*.pdf           lecture notes and assignment plans
-<output>/<course>/attachments/   screenshots and page pictures
-<output>/<course>/sources/       transcripts, slide text
-<output>/<course>/notes/         summaries and homework notes
+Downloads/homework-vault/ELEC1111 Vault/
+  1 Notes/         ELEC1111 Notes.pdf       one big summary of every lecture-notes file, with links (about 30 pages)
+    Source files/  downloaded notes, page text, transcripts
+  2 Homework/      a screenshot of every homework, Questions.md (OCR of the questions only), assignment plan
+  3 Exam Prep/     ELEC1111 Exam Prep.pdf   exam and test dates, what each covers, what to practice, a countdown plan
 ```
+
+At the end of every run the tool scans for duplicate files (`dedupe`). Lecture slides and notes are used instead of transcribing recordings, which saves a lot of tokens.
 
 ## Licence
 

@@ -29,12 +29,20 @@ def safe(name):
     return re.sub(r'[<>:"/\|?*]+', "", name).strip() or "course"
 
 
+PARTS = ("1 Notes", "2 Homework", "3 Exam Prep")
+SECTIONS = {"notes": "1 Notes", "sources": "1 Notes/Source files", "lectures": "1 Notes/Source files",
+            "attachments": "2 Homework", "homework": "2 Homework", "exam": "3 Exam Prep"}
+
+
 def cdir(course):
-    """The one folder that holds everything for a course, named like 'ELEC1111 Vault'."""
+    """The one folder for a course, like 'ELEC1111 Vault', always holding the three parts."""
     name = safe(course)
     if not name.lower().endswith("vault"):
         name += " Vault"
-    return vault() / name
+    root = vault() / name
+    for part in PARTS:
+        (root / part).mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def stamp():
@@ -42,7 +50,7 @@ def stamp():
 
 
 def sub(course, name):
-    d = cdir(course) / name
+    d = cdir(course) / SECTIONS.get(name, name)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -63,22 +71,29 @@ def cmd_shot(a):
         mss.tools.to_png(img.rgb, img.size, output=str(out))
     print(out)
     print(f"![[{out.name}]]")
-    if a.ocr:
-        print(_ocr(out, a.course))
 
 
-def _ocr(image, course):
+def _ocr(image, course, region=None):
+    """Read text from an image, or only from a region (the question itself).
+    Appends to <course> Vault/2 Homework/Questions.md, so whole pages are never stored as text."""
+    import numpy as np
+    from PIL import Image
     from rapidocr_onnxruntime import RapidOCR
 
-    result, _ = RapidOCR()(str(image))
-    lines = [r[1] for r in (result or [])]
-    out = sub(course, "sources") / f"{pathlib.Path(image).stem}-ocr.txt"
-    out.write_text("\n".join(lines), encoding="utf-8")
+    img = Image.open(image).convert("RGB")
+    if region:
+        x, y, w, h = region
+        img = img.crop((x, y, x + w, y + h))
+    result, _ = RapidOCR()(np.array(img))
+    text = "\n".join(r[1] for r in (result or []))
+    out = sub(course, "attachments") / "Questions.md"
+    with open(out, "a", encoding="utf-8") as f:
+        f.write(f"## {pathlib.Path(image).name}\n\n{text}\n\n")
     return out
 
 
 def cmd_ocr(a):
-    print(_ocr(a.file, a.course))
+    print(_ocr(a.file, a.course, a.region))
 
 
 def _transcribe(path, course, model_name):
@@ -280,7 +295,7 @@ def cmd_fixcaptions(a):
     """Fix speech-to-text errors with the course's own vocabulary. Unsure cases are marked [ambiguous]."""
     from difflib import SequenceMatcher
 
-    src = cdir(a.course) / "sources"
+    src = sub(a.course, "sources")
     text = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in src.glob("*.md")) if src.exists() else ""
     words = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text))
     terms = {w for w in words if len(w) >= 4 and ("_" in w or re.search(r"[a-z][A-Z]", w))}
@@ -441,7 +456,7 @@ def cmd_grab(a):
                 queue.append((link, depth + 1))
 
     got = []
-    fdir = sub(a.course, "attachments") / "files"
+    fdir = sub(a.course, "sources") / "files"
     fdir.mkdir(parents=True, exist_ok=True)
     for link in files:
         name = slug(pathlib.Path(urlparse(link).path).stem) + pathlib.Path(urlparse(link).path).suffix.lower()
@@ -470,7 +485,7 @@ def cmd_grab(a):
                 vids.append((vid, f"no captions ({e})"))
             time.sleep(a.pace)
 
-    idx = cdir(a.course) / "index.md"
+    idx = sub(a.course, "sources") / "index.md"
     lines = [f"# Download index for {a.url}", "", f"## Pages ({len(pages)})"]
     lines += [f"- {u} -> sources/{o.name}" for u, o in pages]
     lines += ["", f"## Files ({len(got)})"] + [f"- {u} -> attachments/files/{d.name}" for u, d in got]
@@ -507,14 +522,17 @@ def cmd_webshot(a):
     print(f"![[{out.name}]]")
 
 
-def _latin(text):
+def _plain(text):
     """Core PDF fonts are latin-1 only: swap common symbols, drop the rest."""
     for k, v in {"’": "'", "‘": "'", "“": '"', "”": '"', "–": "-",
                  "—": "-", "→": "->", "•": "-", "…": "...", " ": " "}.items():
         text = text.replace(k, v)
-    text = text.encode("latin-1", "ignore").decode("latin-1")
-    # break very long unbroken strings (URLs) so the PDF can wrap them
-    return re.sub(r"(\S{90})(?=\S)", r"\1 ", text)
+    return text.encode("latin-1", "ignore").decode("latin-1")
+
+
+def _latin(text):
+    # break very long unbroken strings so the PDF can wrap them
+    return re.sub(r"(\S{90})(?=\S)", r"\1 ", _plain(text))
 
 
 def cmd_pdf(a):
@@ -528,10 +546,29 @@ def cmd_pdf(a):
     pdf.add_page()
     pdf.set_title(a.title)
 
+    link_re = re.compile(r"(\[[^\]]+\]\(https?://[^)\s]+\)|https?://[^\s)]+)")
+
     def line(txt, size=11, style="", indent=0, font="Helvetica", h=6):
         pdf.set_font(font, style, size)
         pdf.set_x(pdf.l_margin + indent)
-        pdf.multi_cell(0, h, _latin(txt), new_x="LMARGIN", new_y="NEXT")
+        if font == "Courier" or not link_re.search(txt):
+            pdf.multi_cell(0, h, _latin(txt), new_x="LMARGIN", new_y="NEXT")
+            return
+        for part in link_re.split(txt):  # clickable links: [label](url) and bare urls
+            if not part:
+                continue
+            m = re.match(r"\[([^\]]+)\]\((.+)\)$", part)
+            if m or part.startswith("http"):
+                label, url = (m.group(1), m.group(2)) if m else (part, part)
+                pdf.set_text_color(0, 0, 200)
+                pdf.set_font(font, "U", size)
+                pdf.write(h, _plain(label), link=url)
+            else:
+                pdf.set_text_color(0, 0, 0)
+                pdf.set_font(font, style, size)
+                pdf.write(h, _plain(part))
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(h)
 
     code = False
     for raw in md.splitlines():
@@ -558,9 +595,7 @@ def cmd_pdf(a):
             pdf.ln(2)
         else:
             line(s)
-    out_dir = cdir(a.course)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{safe(a.title)}.pdf"
+    out = sub(a.course, a.section) / f"{safe(a.title)}.pdf"
     pdf.output(str(out))
     print(out)
 
@@ -613,9 +648,7 @@ def cmd_merge(a):
             w.add_page(pg)
         w.add_outline_item(f.stem, start)  # bookmark per source file
         used.append(f)
-    out_dir = cdir(a.course)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{safe(a.name) if a.name else out_dir.name}.pdf"
+    out = sub(a.course, "sources") / f"{safe(a.name) if a.name else cdir(a.course).name}.pdf"
     with open(out, "wb") as fh:
         w.write(fh)
     if a.delete_dupes:
@@ -646,7 +679,6 @@ def main():
     p.add_argument("--monitor", type=int, default=1, help="0 = all screens")
     p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"))
     p.add_argument("--delay", type=float, default=0)
-    p.add_argument("--ocr", action="store_true", help="also write the page text to sources/")
 
     p = add("dedupe", cmd_dedupe, help="scan the course folder for exact duplicate files")
     p.add_argument("--delete", action="store_true", help="delete the duplicates")
@@ -678,8 +710,9 @@ def main():
     p.add_argument("--width", type=int, default=1200)
     p.add_argument("--height", type=int, default=4000)
 
-    p = add("ocr", cmd_ocr, help="read text from an existing image")
+    p = add("ocr", cmd_ocr, help="OCR only the question region of an image into 2 Homework/Questions.md")
     p.add_argument("file")
+    p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"), help="only this rectangle (the question)")
 
     p = add("transcribe", cmd_transcribe, help="audio/video file to transcript")
     p.add_argument("file")
@@ -711,8 +744,10 @@ def main():
     p.add_argument("--retries", type=int, default=3, help="tries when YouTube rate-limits")
     p.add_argument("--model", default="small")
 
-    p = add("pdf", cmd_pdf, help="markdown on stdin to a PDF in <vault>/<course>/")
+    p = add("pdf", cmd_pdf, help="markdown on stdin to a PDF in one of the three parts")
     p.add_argument("--title", required=True)
+    p.add_argument("--section", choices=["notes", "homework", "exam"], default="notes",
+                   help="notes = 1 Notes, homework = 2 Homework, exam = 3 Exam Prep")
 
     a = ap.parse_args()
     a.fn(a)
