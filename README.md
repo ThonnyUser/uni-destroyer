@@ -7,6 +7,25 @@ A skill file (`SKILL.md`) plus one local script. It lets an LLM agent summarise 
 - Inputs: a course URL (public, or a page open in your browser when the agent has a browser tool), video links, recordings, live mic audio, slides (pdf/pptx), screenshots.
 - Output (in your Downloads folder): a notes PDF with lecture summaries and concepts, a picture of the homework page, and an assignment plan PDF. The plan is advice only; it never does the assignment for you.
 
+## Download only (free, no summaries)
+
+You can use the tool just to download a course, with no LLM and no tokens. Run it yourself in a terminal:
+
+```bash
+python scripts/hw.py grab https://your-course-site/ --course maths --depth 1 --videos
+```
+
+It saves into `Downloads/homework-vault/maths/`:
+
+- every page it reaches as plain text (`sources/`), with JavaScript pages loaded in a headless Edge or Chrome
+- linked files from the same site: pdf, pptx, docx, code files (`attachments/files/`)
+- captions for every YouTube link it finds (`--videos`), saved as text
+- `index.md`, a list of everything found and what was saved
+
+Options: `--depth 0` is one page only. `--max-pages 30` caps the crawl. `--max-mb 50` skips big files. `--pace 25` waits between videos, because YouTube answers "HTTP 429" if asked too fast. Videos with no captions are listed in `index.md` and skipped.
+
+Limits: pages behind a login show only the login screen. For those, open the page in your browser and let an agent with a browser tool read it. `fixcaptions` (free, also local) can clean up the caption text afterwards. To get summaries and notes, load `SKILL.md` into an LLM agent. That part costs tokens.
+
 ## Token cost (read this first)
 
 The LLM has to read everything it summarises, so a full course uses a lot of tokens:

@@ -15,6 +15,8 @@ All outputs go in **Downloads** so the user finds them easily: `~/Downloads/home
 2. **Homework picture** (`<course>/attachments/*.png`): an image of the assignment page.
 3. **Assignment plan PDF**: advice and a plan only. **Never do the assignment for the user.** No solution code, no answers, no finished drafts. Give a day-by-day schedule, what to review, how the marks work, common mistakes, and where to get help. If the user asks you to solve it, say you only give a plan, and make the plan more detailed.
 
+**Download only.** If the user wants the material downloaded without summaries, run `python scripts/hw.py grab URL --course C --depth 1 --videos` and stop. Do not read the files and do not summarise. Tell the user where the files are (`index.md` lists everything). This costs almost no tokens. Pages behind a login need your browser tool instead.
+
 Working files (transcripts, page text) go in `<course>/sources/` and `<course>/attachments/`. Keep the PDFs at the top of the course folder.
 
 ## Setup (once)
@@ -34,6 +36,7 @@ All need `--course <name>`. Each prints the path it wrote.
 
 | Job | Command |
 |---|---|
+| Download a whole site (no summary) | `python scripts/hw.py grab URL --course C --depth 1 --videos` |
 | Download a public page | `python scripts/hw.py fetch URL --course C` (`--depth 1` adds same-site links) |
 | Save text you read in a browser | `python scripts/hw.py save --course C --label L --source URL` with text on stdin |
 | Video link to transcript | `python scripts/hw.py captions URL --course C --captions-only` |

@@ -332,10 +332,9 @@ def cmd_fixcaptions(a):
     print(f"{fixed} fixed, {len(log) - fixed} ambiguous. Log: {logf}")
 
 
-def cmd_webshot(a):
-    """Picture of a web page only (not the desktop), using headless Edge or Chrome."""
+def _browser():
+    """Path of Edge or Chrome, or None."""
     import shutil
-    import subprocess
 
     names = ["msedge", "chrome", "google-chrome", "chromium"]
     paths = [
@@ -344,8 +343,136 @@ def cmd_webshot(a):
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     ]
-    exe = next((shutil.which(n) for n in names if shutil.which(n)), None) or next(
+    return next((shutil.which(n) for n in names if shutil.which(n)), None) or next(
         (p for p in paths if os.path.exists(p)), None)
+
+
+def _rendered(url):
+    """Page HTML after JavaScript runs (headless Edge or Chrome). Falls back to a plain download."""
+    import subprocess
+    import tempfile
+
+    exe = _browser()
+    if exe:
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as prof:
+                r = subprocess.run([exe, "--headless=new", "--disable-gpu", f"--user-data-dir={prof}",
+                                    "--virtual-time-budget=8000", "--dump-dom", url],
+                                   capture_output=True, timeout=90)
+            html = r.stdout.decode("utf-8", errors="replace")
+            if "<html" in html.lower():
+                return html
+        except Exception:
+            pass
+    import trafilatura
+
+    return trafilatura.fetch_url(url) or ""
+
+
+FILE_EXT = (".pdf", ".pptx", ".ppt", ".docx", ".doc", ".txt", ".c", ".h", ".py", ".ipynb", ".csv", ".zip")
+SKIP_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".css", ".js", ".ico", ".woff", ".woff2", ".mp4")
+YT_ID = re.compile(r"(?:youtube\.com/(?:watch\?v=|live/|embed/)|youtu\.be/)([\w-]{11})")
+
+
+def cmd_grab(a):
+    """Download only: pages as text, linked files, video captions. No summaries, no LLM, no tokens."""
+    import argparse as ap_
+    import trafilatura
+    import urllib.request
+    from html.parser import HTMLParser
+    from urllib.parse import urljoin, urldefrag, urlparse
+
+    class Links(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.found = []
+
+        def handle_starttag(self, tag, attrs):
+            for k, v in attrs:
+                if k in ("href", "src") and v:
+                    self.found.append(v)
+
+    host = urlparse(a.url).netloc
+    seen, queue = set(), [(a.url, 0)]
+    pages, files, videos = [], {}, {}
+    while queue and len(seen) < a.max_pages:
+        url, depth = queue.pop(0)
+        if url in seen:
+            continue
+        seen.add(url)
+        html = _rendered(url)
+        if not html:
+            print(f"skipped (could not load): {url}", file=sys.stderr)
+            continue
+        text = trafilatura.extract(html, include_links=True, output_format="markdown") or ""
+        if text.strip():
+            u = urlparse(url)
+            out = sub(a.course, "sources") / f"{stamp()}-{slug(u.netloc + u.path)[:60]}.md"
+            out.write_text(f"Source: {url}\n\n{text}\n", encoding="utf-8")
+            pages.append((url, out))
+            print(f"page: {out.name}")
+        for m in YT_ID.finditer(html):
+            videos.setdefault(m.group(1), url)
+        p = Links()
+        p.feed(html)
+        for href in p.found:
+            link = urldefrag(urljoin(url, href))[0]
+            if not link.startswith("http"):
+                continue
+            path = urlparse(link).path.lower()
+            if path.endswith(FILE_EXT):
+                if urlparse(link).netloc == host:
+                    files.setdefault(link, url)
+            elif not path.endswith(SKIP_EXT) and urlparse(link).netloc == host and depth < a.depth \
+                    and link not in seen and all(q[0] != link for q in queue):
+                queue.append((link, depth + 1))
+
+    got = []
+    fdir = sub(a.course, "attachments") / "files"
+    fdir.mkdir(parents=True, exist_ok=True)
+    for link in files:
+        name = slug(pathlib.Path(urlparse(link).path).stem) + pathlib.Path(urlparse(link).path).suffix.lower()
+        dest = fdir / name
+        try:
+            with urllib.request.urlopen(link, timeout=60) as r:
+                data = r.read(a.max_mb * 1024 * 1024 + 1)
+            if len(data) > a.max_mb * 1024 * 1024:
+                print(f"skipped (over {a.max_mb} MB): {link}", file=sys.stderr)
+                continue
+            dest.write_bytes(data)
+            got.append((link, dest))
+            print(f"file: {dest.name}")
+        except Exception as e:
+            print(f"skipped file {link}: {e}", file=sys.stderr)
+
+    vids = []
+    if a.videos:
+        for vid, src in videos.items():
+            ns = ap_.Namespace(url=f"https://www.youtube.com/watch?v={vid}", course=a.course, lang="en",
+                               model="small", captions_only=True, retries=3)
+            try:
+                cmd_captions(ns)
+                vids.append((vid, "captions saved"))
+            except SystemExit as e:
+                vids.append((vid, f"no captions ({e})"))
+            time.sleep(a.pace)
+
+    idx = vault() / slug(a.course) / "index.md"
+    lines = [f"# Download index for {a.url}", "", f"## Pages ({len(pages)})"]
+    lines += [f"- {u} -> sources/{o.name}" for u, o in pages]
+    lines += ["", f"## Files ({len(got)})"] + [f"- {u} -> attachments/files/{d.name}" for u, d in got]
+    lines += ["", f"## Videos found ({len(videos)})"]
+    lines += [f"- https://www.youtube.com/watch?v={v} (on {s})" + (f": {dict(vids).get(v, 'not fetched')}" if a.videos else "")
+              for v, s in videos.items()]
+    idx.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"{len(pages)} pages, {len(got)} files, {len(videos)} videos found. Index: {idx}")
+
+
+def cmd_webshot(a):
+    """Picture of a web page only (not the desktop), using headless Edge or Chrome."""
+    import subprocess
+
+    exe = _browser()
     if not exe:
         sys.exit("No Edge or Chrome found. Use `shot` instead.")
     out = sub(a.course, "attachments") / f"{stamp()}-{slug(a.label)}.png"
@@ -441,6 +568,14 @@ def main():
     p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"))
     p.add_argument("--delay", type=float, default=0)
     p.add_argument("--ocr", action="store_true", help="also write the page text to sources/")
+
+    p = add("grab", cmd_grab, help="download only: pages, linked files, video captions (no summary, no tokens)")
+    p.add_argument("url")
+    p.add_argument("--depth", type=int, default=1, help="0 = this page, 1 = plus pages it links to")
+    p.add_argument("--max-pages", type=int, default=30)
+    p.add_argument("--max-mb", type=int, default=50, help="skip files larger than this")
+    p.add_argument("--videos", action="store_true", help="also download captions of YouTube links found")
+    p.add_argument("--pace", type=int, default=25, help="seconds to wait between videos (avoids HTTP 429)")
 
     p = add("fixcaptions", cmd_fixcaptions, help="auto-correct a transcript using the course's own terms")
     p.add_argument("file")
