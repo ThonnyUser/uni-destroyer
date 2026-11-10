@@ -149,6 +149,104 @@ def cmd_note(a):
     print(out)
 
 
+def cmd_save(a):
+    text = sys.stdin.read().strip()
+    if not text:
+        sys.exit("Pipe the text into stdin.")
+    out = sub(a.course, "sources") / f"{stamp()}-{slug(a.label)}.md"
+    head = f"Source: {a.source}\n\n" if a.source else ""
+    out.write_text(head + text + "\n", encoding="utf-8")
+    print(out)
+
+
+def cmd_fetch(a):
+    import trafilatura
+    from html.parser import HTMLParser
+    from urllib.parse import urljoin, urldefrag, urlparse
+
+    class Links(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.found = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                for k, v in attrs:
+                    if k == "href" and v:
+                        self.found.append(v)
+
+    host = urlparse(a.url).netloc
+    seen, queue = set(), [(a.url, 0)]
+    while queue and len(seen) < a.max_pages:
+        url, depth = queue.pop(0)
+        if url in seen:
+            continue
+        seen.add(url)
+        html = trafilatura.fetch_url(url)
+        if not html:
+            print(f"skipped (no download): {url}", file=sys.stderr)
+            continue
+        text = trafilatura.extract(html, include_links=True, output_format="markdown") or ""
+        if not text.strip():
+            print(f"skipped (no text, page may need a login or JavaScript): {url}", file=sys.stderr)
+        else:
+            u = urlparse(url)
+            out = sub(a.course, "sources") / f"{stamp()}-{slug(u.netloc + u.path)[:60]}.md"
+            out.write_text(f"Source: {url}\n\n{text}\n", encoding="utf-8")
+            print(out)
+        if depth < a.depth:
+            p = Links()
+            p.feed(html)
+            for href in p.found:
+                link = urldefrag(urljoin(url, href))[0]
+                if link.startswith("http") and urlparse(link).netloc == host and link not in seen:
+                    queue.append((link, depth + 1))
+
+
+def cmd_captions(a):
+    import glob
+
+    import yt_dlp
+
+    d = sub(a.course, "sources")
+    tag = stamp()
+    opts = {
+        "skip_download": True,
+        "writesubtitles": True,
+        "writeautomaticsub": True,
+        "subtitleslangs": [a.lang],
+        "subtitlesformat": "vtt",
+        "outtmpl": str(d / f"{tag}-%(id)s.%(ext)s"),
+        "quiet": True,
+    }
+    with yt_dlp.YoutubeDL(opts) as y:
+        y.download([a.url])
+    vtts = glob.glob(str(d / f"{tag}-*.vtt"))
+    if vtts:
+        lines, last = [], ""
+        for raw in open(vtts[0], encoding="utf-8"):
+            t = re.sub(r"<[^>]+>", "", raw).strip()
+            if not t or t.startswith(("WEBVTT", "Kind:", "Language:")) or "-->" in t:
+                continue
+            if t != last:
+                lines.append(t)
+                last = t
+        out = pathlib.Path(vtts[0]).with_suffix(".txt")
+        out.write_text("\n".join(lines), encoding="utf-8")
+        for v in vtts:
+            os.remove(v)
+        print(out)
+        return
+    print("No captions found. Downloading audio to transcribe.", file=sys.stderr)
+    opts = {"format": "bestaudio", "outtmpl": str(d / f"{tag}-%(id)s.%(ext)s"), "quiet": True}
+    with yt_dlp.YoutubeDL(opts) as y:
+        y.download([a.url])
+    audio = [p for p in glob.glob(str(d / f"{tag}-*")) if not p.endswith(".txt")]
+    if not audio:
+        sys.exit("Download failed.")
+    print(_transcribe(audio[0], a.course, a.model))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -182,6 +280,20 @@ def main():
     p = add("note", cmd_note, help="save markdown from stdin as a note")
     p.add_argument("--title", required=True)
     p.add_argument("--kind", choices=["lecture", "homework"], default="lecture")
+
+    p = add("save", cmd_save, help="save text from stdin into sources/ (for pages read in a browser)")
+    p.add_argument("--label", default="page")
+    p.add_argument("--source", default="", help="URL the text came from")
+
+    p = add("fetch", cmd_fetch, help="download a public web page (and same-site links) as text")
+    p.add_argument("url")
+    p.add_argument("--depth", type=int, default=0, help="0 = this page only, 1 = plus pages it links to")
+    p.add_argument("--max-pages", type=int, default=10)
+
+    p = add("captions", cmd_captions, help="YouTube/video URL to transcript (captions, else audio)")
+    p.add_argument("url")
+    p.add_argument("--lang", default="en")
+    p.add_argument("--model", default="small")
 
     a = ap.parse_args()
     a.fn(a)

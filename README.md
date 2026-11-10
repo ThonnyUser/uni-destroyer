@@ -4,17 +4,18 @@ A skill file (`SKILL.md`) plus one local script. It lets an LLM agent summarise 
 
 - Runs on your machine. Transcription uses `faster-whisper`; screenshots use `mss`.
 - The LLM that loads the skill writes the summaries. No API key is part of this repo.
-- Inputs: recordings, live mic audio, slides (pdf/pptx), screenshots.
+- Inputs: a course URL (public, or a page open in your browser when the agent has a browser tool), video links, recordings, live mic audio, slides (pdf/pptx), screenshots.
+- Output: a summary note per lecture with "Watch next" video titles, and a homework note with tips.
 
 ## Academic integrity
 
-This tool helps you organise and understand your own study material. It does not solve homework: the skill tells the LLM to capture and file assignments, not to answer them. Follow your university's rules on AI use and recording lectures. You are responsible for how you use it.
+This tool helps you organise and understand your own study material. For assignments it files the task and gives tips; it only drafts or solves one if you ask. Follow your university's rules on AI use and recording lectures. You are responsible for how you use it.
 
 ## Install
 
 1. **Install Python 3.12** from https://www.python.org/downloads/ . On Windows, tick "Add python.exe to PATH" in the installer. Check with `python --version`.
 2. Copy this folder into your agent's skills folder (for Claude Code: `~/.claude/skills/homework-vault/`).
-3. Install the packages: `pip install rapidocr-onnxruntime mss faster-whisper sounddevice numpy pypdf python-pptx`
+3. Install the packages: `pip install rapidocr-onnxruntime mss trafilatura lxml_html_clean yt-dlp faster-whisper sounddevice numpy pypdf python-pptx`
 4. Set `HW_VAULT` to your vault folder.
 
 ## Layout in the vault
