@@ -557,6 +557,53 @@ def cmd_pdf(a):
     print(out)
 
 
+def cmd_merge(a):
+    """Join PDFs from a folder into ONE PDF named after the course. Exact duplicates are skipped."""
+    import hashlib
+
+    from pypdf import PdfReader, PdfWriter
+
+    def natural(p):
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
+
+    files = sorted(pathlib.Path(a.folder).expanduser().glob(a.glob), key=natural)
+    if not files:
+        sys.exit(f"No files match {a.glob} in {a.folder}")
+    w, seen, used, dupes = PdfWriter(), set(), [], []
+    for f in files:
+        digest = hashlib.sha256(f.read_bytes()).hexdigest()
+        if digest in seen:
+            dupes.append(f)
+            continue
+        seen.add(digest)
+        try:
+            pages = PdfReader(str(f)).pages
+        except Exception as e:
+            print(f"skipped unreadable {f.name}: {e}", file=sys.stderr)
+            continue
+        start = len(w.pages)
+        for pg in pages:
+            w.add_page(pg)
+        w.add_outline_item(f.stem, start)  # bookmark per source file
+        used.append(f)
+    out_dir = vault() / safe(a.course)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{safe(a.name or a.course)}.pdf"
+    with open(out, "wb") as fh:
+        w.write(fh)
+    if a.delete_dupes:
+        for d in dupes:
+            d.unlink()
+    if a.delete_sources:
+        for f in used + dupes:
+            if f.exists():
+                f.unlink()
+    print(out)
+    print(f"{len(used)} files merged, {len(dupes)} exact duplicates skipped"
+          + (" and deleted" if a.delete_dupes or a.delete_sources else "")
+          + (", sources deleted" if a.delete_sources else "") + f". {len(w.pages)} pages.")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -573,6 +620,13 @@ def main():
     p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"))
     p.add_argument("--delay", type=float, default=0)
     p.add_argument("--ocr", action="store_true", help="also write the page text to sources/")
+
+    p = add("merge", cmd_merge, help="merge PDFs from a folder into one PDF named after the course")
+    p.add_argument("folder", help="folder holding the downloaded PDFs")
+    p.add_argument("--glob", default="*.pdf", help='which files, e.g. "ELEC1111 *.pdf"')
+    p.add_argument("--name", help="output file name (default: the course name)")
+    p.add_argument("--delete-dupes", action="store_true", help="delete exact duplicate files after merging")
+    p.add_argument("--delete-sources", action="store_true", help="delete the single files after merging (ask the user first)")
 
     p = add("grab", cmd_grab, help="download only: pages, linked files, video captions (no summary, no tokens)")
     p.add_argument("url")

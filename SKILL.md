@@ -47,6 +47,7 @@ All need `--course <name>`. Each prints the path it wrote.
 | Transcribe a recording | `python scripts/hw.py transcribe file.mp4 --course C` |
 | Record live audio | `python scripts/hw.py record --course C` (Ctrl+C stops) |
 | Read slides | `python scripts/hw.py slides deck.pdf --course C` (pdf, pptx, txt) |
+| Merge PDFs into one (skips duplicates) | `python scripts/hw.py merge FOLDER --glob "*.pdf" --course "ELEC1111 Vault"` |
 | Markdown to PDF | `python scripts/hw.py pdf --course C --title T` with markdown on stdin |
 | Save a markdown note | `python scripts/hw.py note --course C --title T --kind lecture` with markdown on stdin |
 
@@ -59,6 +60,13 @@ Prefer `webshot` over `shot` for web pages. `shot` captures the whole desktop an
 3. **Crawl the whole site.** If the user wants everything, cover every week and every lecture. Do not stop at a sample. Open every link on the same site that holds course material: weekly pages, lectures, tutorials, labs, assignments, resources, FAQ. Run `expand.js` on each page first. Keep a list of visited URLs so you never loop. Stay on the course site, and do not open links to other sites unless they are lecture videos or the user asks.
 4. **Lecture videos**: run `captions URL --captions-only` for each. Pace them, and expect "HTTP 429 Too Many Requests" from YouTube. The script retries with waits. For videos that still fail, run again later, or transcribe the audio with `faster-whisper` if the user allows the large download.
 5. Correct each transcript (next section), then read it and the slides. Write the summaries.
+
+## Workflow: downloading course files (slides, lecture notes)
+
+1. **Slides first, no transcription.** If a lecture has slides or lecture notes on the course page, use those and do **not** transcribe its recording. Transcripts are the biggest token cost. Transcribe only lectures that have no written material.
+2. **One file at a time.** Download each file in its own step: one request, then check that the file arrived in Downloads (name and size) before you start the next. Never run a loop that downloads many files in one call: browsers time out, ask "allow multiple downloads", or silently drop files. If the browser asks to allow multiple downloads, ask the user to click Allow, then continue.
+3. **Name files clearly**: `<COURSE> <NN> <title>`, for example `ELEC1111 03 Topic 2 - Lecture Notes.pdf`, so they sort in course order.
+4. **Remove duplicates and make one file.** Run `python scripts/hw.py merge ~/Downloads --glob "ELEC1111 *.pdf" --course "ELEC1111 Vault"`. It joins the PDFs in order into one file named after the course (`ELEC1111 Vault.pdf`), with a bookmark per source file, and skips exact duplicates. Add `--delete-dupes` to delete the duplicate files. Ask the user before using `--delete-sources`, which deletes the single files after merging.
 
 ## Workflow: correcting transcripts
 
