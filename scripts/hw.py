@@ -30,7 +30,7 @@ def safe(name):
 
 
 SECTIONS = {"sources": "_work", "lectures": "_work", "notes": "_work",
-            "attachments": "_work/Homework", "homework": "_work/Homework"}
+            "attachments": "Homework", "homework": "Homework"}
 
 
 def cdir(course):
@@ -40,7 +40,8 @@ def cdir(course):
     if not name.lower().endswith("vault"):
         name += " Vault"
     root = vault() / name
-    root.mkdir(parents=True, exist_ok=True)
+    for part in ("Homework", "Assignments"):  # folders: Homework holds pictures, Assignments holds plans
+        (root / part).mkdir(parents=True, exist_ok=True)
     return root
 
 
@@ -48,8 +49,10 @@ def stamp():
     return dt.datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
 
-def sub(course, name):
+def sub(course, name, group=None):
     d = cdir(course) / SECTIONS.get(name, name)
+    if group:  # subfolder such as 'Week 3'
+        d = d / safe(group)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -60,7 +63,7 @@ def cmd_shot(a):
 
     if a.delay:
         time.sleep(a.delay)
-    out = sub(a.course, "attachments") / f"{stamp()}-{slug(a.label)}.png"
+    out = sub(a.course, "attachments", a.group) / f"{stamp()}-{slug(a.label)}.png"
     with mss.mss() as s:
         area = s.monitors[a.monitor]
         if a.region:
@@ -85,9 +88,14 @@ def _ocr(image, course, region=None):
         img = img.crop((x, y, x + w, y + h))
     result, _ = RapidOCR()(np.array(img))
     text = "\n".join(r[1] for r in (result or []))
-    out = sub(course, "attachments") / "Questions.md"
+    root = sub(course, "attachments")
+    out = root / "Questions.md"
+    try:  # name the question by its folder and file, for example "Week 3/q12.png"
+        label = pathlib.Path(image).resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        label = pathlib.Path(image).name
     with open(out, "a", encoding="utf-8") as f:
-        f.write(f"## {pathlib.Path(image).name}\n\n{text}\n\n")
+        f.write(f"## {label}\n\n{text}\n\n")
     return out
 
 
@@ -502,7 +510,7 @@ def cmd_webshot(a):
     exe = _browser()
     if not exe:
         sys.exit("No Edge or Chrome found. Use `shot` instead.")
-    out = sub(a.course, "attachments") / f"{stamp()}-{slug(a.label)}.png"
+    out = sub(a.course, "attachments", a.group) / f"{stamp()}-{slug(a.label)}.png"
     import tempfile
 
     # a throwaway profile makes the browser start fresh even if the user's browser is open
@@ -594,7 +602,8 @@ def cmd_pdf(a):
             pdf.ln(2)
         else:
             line(s)
-    out = cdir(a.course) / f"{safe(a.title)}.pdf"
+    dest = cdir(a.course) / "Assignments" if a.section == "assignment" else cdir(a.course)
+    out = dest / f"{safe(a.title)}.pdf"
     pdf.output(str(out))
     print(out)
 
@@ -664,65 +673,6 @@ def cmd_merge(a):
           + (", sources deleted" if a.delete_sources else "") + f". {len(w.pages)} pages.")
 
 
-def cmd_pics(a):
-    """Put every homework screenshot into ONE PDF (one image per page, long pages sliced),
-    with the OCR'd questions as text at the end. The loose pictures stay in _work and are deleted by finish."""
-    import tempfile
-
-    from fpdf import FPDF
-    from PIL import Image
-
-    def natural(p):
-        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
-
-    hw = sub(a.course, "homework")
-    imgs = sorted((p for p in hw.glob("*") if p.suffix.lower() in (".png", ".jpg", ".jpeg")), key=natural)
-    if not imgs:
-        sys.exit(f"No homework screenshots in {hw}")
-    qfile = hw / "Questions.md"
-    questions = {}
-    if qfile.exists():
-        for m in re.finditer(r"^## (.+?)\n\n(.*?)(?=\n## |\Z)", qfile.read_text(encoding="utf-8"), re.S | re.M):
-            questions[m.group(1).strip()] = m.group(2).strip()
-    pdf = FPDF()
-    pdf.set_auto_page_break(False)
-    width_mm, height_mm = 190, 262
-    for img in imgs:
-        im = Image.open(img).convert("RGB")
-        if im.width > 1600:
-            im = im.resize((1600, int(im.height * 1600 / im.width)))
-        w, h = im.size
-        slice_px = max(1, int(w * height_mm / width_mm))
-        parts = (h + slice_px - 1) // slice_px
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            for k in range(parts):
-                piece = tmp + f"/{k}.jpg"
-                im.crop((0, k * slice_px, w, min(h, (k + 1) * slice_px))).save(piece, quality=a.quality)
-                pdf.add_page()
-                if k == 0:
-                    snippet = questions.get(img.name, "").replace("\n", " ")[:70]
-                    pdf.start_section(_plain(f"{img.stem}: {snippet}" if snippet else img.stem))
-                pdf.set_font("Helvetica", "B", 9)
-                pdf.set_xy(10, 6)
-                pdf.cell(0, 5, _plain(img.stem) + (f" (part {k + 1} of {parts})" if parts > 1 else ""))
-                pdf.image(piece, x=10, y=13, w=width_mm)
-    if questions:
-        pdf.add_page()
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 8, "Questions (text)", new_x="LMARGIN", new_y="NEXT")
-        for name, text in questions.items():
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.multi_cell(0, 5, _plain(name), new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 9)
-            pdf.multi_cell(0, 4.5, _latin(text) or "[no text found]", new_x="LMARGIN", new_y="NEXT")
-            pdf.ln(2)
-    base = re.sub(r" Vault$", "", cdir(a.course).name)
-    out = cdir(a.course) / f"{safe(a.name) if a.name else base + ' Homework'}.pdf"
-    pdf.output(str(out))
-    print(out)
-    print(f"{len(imgs)} screenshots, {len(questions)} questions, {len(pdf.pages)} pages")
-
-
 def cmd_finish(a):
     """Last step: remove duplicates, then delete every working file used to build the vault."""
     import shutil
@@ -741,9 +691,11 @@ def cmd_finish(a):
         else:
             print(f"skipped (not a file): {p}", file=sys.stderr)
     print("Vault now holds:")
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
-            print("  " + str(p.relative_to(root)))
+    for p in sorted(root.iterdir()):
+        if p.is_dir():
+            print(f"  {p.name}/ ({sum(1 for f in p.rglob('*') if f.is_file())} files)")
+        else:
+            print("  " + p.name)
 
 
 def main():
@@ -758,13 +710,10 @@ def main():
 
     p = add("shot", cmd_shot, help="screenshot into the vault")
     p.add_argument("--label", default="shot")
+    p.add_argument("--group", help="subfolder in Homework, for example Week 3")
     p.add_argument("--monitor", type=int, default=1, help="0 = all screens")
     p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"))
     p.add_argument("--delay", type=float, default=0)
-
-    p = add("pics", cmd_pics, help="all homework screenshots into ONE PDF: <course> Homework.pdf")
-    p.add_argument("--name", help="file name (default: '<course> Homework')")
-    p.add_argument("--quality", type=int, default=70, help="JPEG quality, lower = smaller file")
 
     p = add("finish", cmd_finish, help="last step: dedupe, then delete all working files used to build the vault")
     p.add_argument("--also-delete", nargs="*", metavar="FILE", help="files this run downloaded elsewhere (for example in Downloads)")
@@ -797,6 +746,7 @@ def main():
     p = add("webshot", cmd_webshot, help="picture of a web page (headless browser, page only)")
     p.add_argument("url")
     p.add_argument("--label", default="page")
+    p.add_argument("--group", help="subfolder in Homework, for example Week 3")
     p.add_argument("--width", type=int, default=1200)
     p.add_argument("--height", type=int, default=4000)
 
@@ -836,8 +786,8 @@ def main():
 
     p = add("pdf", cmd_pdf, help="markdown on stdin to a PDF in one of the three parts")
     p.add_argument("--title", required=True)
-    p.add_argument("--section", choices=["notes", "exam"], default="notes",
-                   help="label only: the file is named by --title, for example '<course> Notes' or '<course> Exam Prep'")
+    p.add_argument("--section", choices=["notes", "exam", "assignment"], default="notes",
+                   help="notes and exam go in the vault root; assignment goes in Assignments/. The file is named by --title")
 
     a = ap.parse_args()
     a.fn(a)
