@@ -37,6 +37,7 @@ All need `--course <name>`. Each prints the path it wrote.
 | Download a public page | `python scripts/hw.py fetch URL --course C` (`--depth 1` adds same-site links) |
 | Save text you read in a browser | `python scripts/hw.py save --course C --label L --source URL` with text on stdin |
 | Video link to transcript | `python scripts/hw.py captions URL --course C --captions-only` |
+| Auto-correct a transcript | `python scripts/hw.py fixcaptions transcript.txt --course C` (writes `.corrected.txt` and `.corrections.txt`) |
 | Picture of a web page (page only) | `python scripts/hw.py webshot URL --course C --label L` (headless Edge or Chrome) |
 | Screenshot of the screen | `python scripts/hw.py shot --course C --label L [--ocr] [--region X Y W H] [--delay 3]` |
 | OCR an image | `python scripts/hw.py ocr page.png --course C` |
@@ -50,11 +51,32 @@ Prefer `webshot` over `shot` for web pages. `shot` captures the whole desktop an
 
 ## Workflow: user gives a course URL, or has a course page open
 
-1. **Page open in the user's browser** (login pages, JavaScript pages): use your browser tool. Read the page text and the list of links. Course pages often hide lecture links in a side menu that `fetch` misses, so list all links with a script (for example, every link whose text contains "YouTube", "Lecture", "Slides", "Week").
+1. **Page open in the user's browser** (login pages, JavaScript pages): use your browser tool. Read the page text and the list of links. Course pages often hide lecture links in a side menu that `fetch` misses, so list all links with a script (for example, every link whose text contains "YouTube", "Lecture", "Slides", "Week"). Then run `scripts/expand.js` in the page, twice, to open every hidden section: accordions, tabs, "Show more", collapsed examples and code. Check that the text length goes up. The script clicks only closed toggles. It never clicks submit, delete, post, pay, send, save, or sign-out buttons, and you must not click those either.
 2. **Public page**: run `fetch`. Add `--depth 1` for linked pages. If it reports "no text", use your browser tool.
-3. **Run all of it.** If the user wants everything, cover every week and every lecture. Do not stop at a sample.
+3. **Crawl the whole site.** If the user wants everything, cover every week and every lecture. Do not stop at a sample. Open every link on the same site that holds course material: weekly pages, lectures, tutorials, labs, assignments, resources, FAQ. Run `expand.js` on each page first. Keep a list of visited URLs so you never loop. Stay on the course site, and do not open links to other sites unless they are lecture videos or the user asks.
 4. **Lecture videos**: run `captions URL --captions-only` for each. Pace them, and expect "HTTP 429 Too Many Requests" from YouTube. The script retries with waits. For videos that still fail, run again later, or transcribe the audio with `faster-whisper` if the user allows the large download.
-5. Read the transcripts and slides. Write the summaries.
+5. Correct each transcript (next section), then read it and the slides. Write the summaries.
+
+## Workflow: correcting transcripts
+
+Auto-captions mishear technical words ("print f", "maloc", "strruct"). Fix them in two steps. Never fix silently where you are unsure.
+
+1. **Run `fixcaptions`** on each transcript, after `fetch` or `save` has stored the course pages. It uses the course's own vocabulary (code names from the pages, plus common programming terms) to fix clear mishearings and to join split words like "scan f" into `scanf`. Unsure cases are marked `[ambiguous: maybe X]` in the text. It keeps the original file and writes a log of every change. Read the log: undo any change that looks wrong. `--terms file.txt` adds extra words, one per line.
+2. **Correct by context while you read.** Use the slides, code pages and assignment text to fix names, spellings and obvious errors. Check every number, formula and line of code against a source.
+3. **If you cannot correct it with confidence, write `[ambiguous]`** (or `[ambiguous: could be X or Y]`) in the notes. Never guess a number, formula, name or code. Never drop a doubtful passage without saying so.
+4. End the notes PDF with a short **Ambiguities** list of everything marked, so the student can check it with the lecturer or the video.
+
+## Workflow: past assignments
+
+When the course site links earlier assignments (or earlier terms of the same course), analyse them too. Open each with your browser tool, run `expand.js`, read it fully, then write one **Past assignments** section in the notes PDF:
+
+- what each assignment asked, and its stages
+- how marks were split (performance, style, stages) and the late penalty
+- which lecture topics each one tests
+- patterns that repeat: typical stage order, rules that cost marks, tools provided
+- how the current assignment compares, and what the student can learn from the past ones
+
+Analyse the specs only. Do not collect other students' solutions, and never copy or reuse another person's assignment work.
 
 ## Workflow: notes PDF (lecture summaries)
 
@@ -68,7 +90,16 @@ Write markdown, then pipe it to `pdf --title "<course> lecture notes"`. For each
 
 End with **Watch next**: 3 to 6 video suggestions by **title and channel only** from well-known educational channels (for example 3Blue1Brown, Khan Academy, CrashCourse, MIT OpenCourseWare, Professor Leonard, StatQuest). Use web search for real titles. Add a URL only if the search returned it. Never invent a title or URL. Never watch the videos. If you cannot search, list topics to search for.
 
-Transcripts are long (about 12,000 words per lecture). For many lectures, work through them one at a time, and tell the user the cost before reading them all.
+## Cost warning (tell the user before a big run)
+
+This skill burns a lot of tokens, because you must read the material:
+
+- one lecture transcript: about 12,000 words, roughly 16,000 tokens
+- a course with 18 lectures: roughly 300,000 tokens just to read them
+- one assignment page with its hidden sections opened: roughly 20,000 tokens
+- every extra step re-reads the whole conversation, so real usage is higher
+
+Say this to the user before reading everything, and offer to do one week at a time. A free plan will probably not cover a full course. Work through lectures one at a time and save each summary before moving on.
 
 ## Workflow: homework picture and assignment plan
 

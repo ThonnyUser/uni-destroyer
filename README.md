@@ -7,6 +7,22 @@ A skill file (`SKILL.md`) plus one local script. It lets an LLM agent summarise 
 - Inputs: a course URL (public, or a page open in your browser when the agent has a browser tool), video links, recordings, live mic audio, slides (pdf/pptx), screenshots.
 - Output (in your Downloads folder): a notes PDF with lecture summaries and concepts, a picture of the homework page, and an assignment plan PDF. The plan is advice only; it never does the assignment for you.
 
+## Token cost (read this first)
+
+The LLM has to read everything it summarises, so a full course uses a lot of tokens:
+
+| Material | Rough size |
+|---|---|
+| One lecture transcript (about 12,000 words) | 16,000 tokens |
+| A course with 18 lectures | 300,000 tokens to read, plus the notes it writes |
+| One assignment page, hidden sections opened | 20,000 tokens |
+
+Each step also re-reads the whole conversation, so real usage is higher. **A free plan will probably not work for a whole course.** Use a paid plan or API credit, or run one week at a time. The script itself (captions, OCR, PDF, screenshots) is free and runs on your PC. Only the LLM's reading and writing cost tokens.
+
+## Accuracy
+
+Auto-captions mishear technical words. `fixcaptions` repairs clear mistakes with the course's own vocabulary and logs every change. Anything it or the LLM cannot fix with confidence is marked `[ambiguous]` in the notes and listed at the end, so nothing is guessed silently. Always check marked passages against the source.
+
 ## Academic integrity
 
 This tool helps you organise and understand your own study material. For assignments it files the task and writes a plan; it does not do the assignment for you. Follow your university's rules on AI use and recording lectures. You are responsible for how you use it.

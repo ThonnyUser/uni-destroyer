@@ -259,6 +259,79 @@ def cmd_captions(a):
     print(_transcribe(audio[0], a.course, a.model))
 
 
+SEED_TERMS = """malloc calloc realloc free scanf printf fgets fprintf sprintf strcpy strncpy strlen strcmp
+strcat typedef struct enum sizeof stdin stdout stderr argv argc""".split()
+
+
+def cmd_fixcaptions(a):
+    """Fix speech-to-text errors with the course's own vocabulary. Unsure cases are marked [ambiguous]."""
+    from difflib import SequenceMatcher
+
+    src = vault() / slug(a.course) / "sources"
+    text = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in src.glob("*.md")) if src.exists() else ""
+    words = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text))
+    terms = {w for w in words if len(w) >= 4 and ("_" in w or re.search(r"[a-z][A-Z]", w))}
+    terms |= set(re.findall(r"`([A-Za-z_][A-Za-z0-9_]*)`", text))
+    terms |= set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\(\)", text))
+    terms |= set(SEED_TERMS)
+    if a.terms:
+        terms |= {t.strip() for t in open(a.terms, encoding="utf-8") if t.strip()}
+    terms = {t for t in terms if not t.isupper()}  # skip CONSTANTS: they match ordinary English words
+    known = {w.lower() for w in words}
+    canon = {t.lower(): t for t in terms}
+    log = []
+    p = pathlib.Path(a.file)
+    body = p.read_text(encoding="utf-8", errors="replace")
+    freq = {}
+    for w in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", body):
+        freq[w.lower()] = freq.get(w.lower(), 0) + 1
+    small = {"to", "is", "in", "it", "of", "on", "at", "as", "an", "or", "be", "by", "do", "go", "if", "so",
+             "no", "we", "up", "my", "me", "he", "us", "am"}
+
+    def best(tok):
+        low = tok.lower()
+        # a word said many times is almost surely a real word, not a one-off mishearing
+        if len(low) < 5 or low in known or low in canon or freq.get(low, 0) >= 3:
+            return None, 0
+        if any(low[:-k] in known for k in (1, 2, 3)):  # plain inflection of a real word: coded, breaks
+            return None, 0
+        same = [c for c in canon if c[0] == low[0]]  # a mishearing keeps its first letter
+        if not same:
+            return None, 0
+        score, pick = max((SequenceMatcher(None, low, c).ratio(), c) for c in same)
+        return pick, score
+
+    def join_pair(m):
+        joined = (m.group(1) + m.group(2)).lower()
+        if m.group(1).lower() in small or m.group(2).lower() in small:
+            return m.group(0)
+        if joined in canon and m.group(0).lower() not in canon:
+            log.append(f"joined '{m.group(0)}' -> '{canon[joined]}'")
+            return canon[joined]
+        return m.group(0)
+
+    def fix_word(m):
+        tok = m.group(0)
+        pick, score = best(tok)
+        if pick and score >= a.fix_at:
+            log.append(f"fixed '{tok}' -> '{canon[pick]}' ({score:.2f})")
+            return canon[pick]
+        if pick and score >= a.flag_at and len(tok) >= 6:
+            log.append(f"AMBIGUOUS '{tok}' maybe '{canon[pick]}' ({score:.2f})")
+            return f"{tok} [ambiguous: maybe {canon[pick]}]"
+        return tok
+
+    body = re.sub(r"\b([A-Za-z]{2,}) ([A-Za-z]{1,})\b", join_pair, body)
+    body = re.sub(r"[A-Za-z_][A-Za-z0-9_]*", fix_word, body)
+    out = p.with_suffix(".corrected.txt")
+    out.write_text(body, encoding="utf-8")
+    logf = p.with_suffix(".corrections.txt")
+    logf.write_text("\n".join(log) or "no changes", encoding="utf-8")
+    fixed = sum(1 for x in log if x.startswith(("fixed", "joined")))
+    print(out)
+    print(f"{fixed} fixed, {len(log) - fixed} ambiguous. Log: {logf}")
+
+
 def cmd_webshot(a):
     """Picture of a web page only (not the desktop), using headless Edge or Chrome."""
     import shutil
@@ -368,6 +441,12 @@ def main():
     p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"))
     p.add_argument("--delay", type=float, default=0)
     p.add_argument("--ocr", action="store_true", help="also write the page text to sources/")
+
+    p = add("fixcaptions", cmd_fixcaptions, help="auto-correct a transcript using the course's own terms")
+    p.add_argument("file")
+    p.add_argument("--terms", help="extra terms file, one per line")
+    p.add_argument("--fix-at", dest="fix_at", type=float, default=0.88, help="similarity to fix silently")
+    p.add_argument("--flag-at", dest="flag_at", type=float, default=0.78, help="similarity to mark [ambiguous]")
 
     p = add("webshot", cmd_webshot, help="picture of a web page (headless browser, page only)")
     p.add_argument("url")
