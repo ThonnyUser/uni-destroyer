@@ -19,6 +19,11 @@ All outputs go in **Downloads** so the user finds them easily: `~/Downloads/home
 
 Working files (transcripts, page text) go in `<course>/sources/` and `<course>/attachments/`. Keep the PDFs at the top of the course folder.
 
+## Always: one folder for everything, then a duplicate scan
+
+- **One container.** Every output for a course goes in a single folder named after the course, like `ELEC1111 Vault`, inside Downloads (`hw.py` does this for you: `--course ELEC1111` gives `Downloads/homework-vault/ELEC1111 Vault/`). Put downloads, notes, pictures, plans and the merged PDF there. Do not scatter files across other folders.
+- **Scan for duplicates at the end of every run.** Run `python scripts/hw.py dedupe --course "ELEC1111 Vault"`. It lists exact duplicate files. Then run it with `--delete` to remove the extras. Tell the user how many it found.
+
 ## Setup (once)
 
 1. Install Python 3.12 from https://www.python.org/downloads/ (Windows: tick "Add python.exe to PATH").

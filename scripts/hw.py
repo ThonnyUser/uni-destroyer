@@ -29,12 +29,20 @@ def safe(name):
     return re.sub(r'[<>:"/\|?*]+', "", name).strip() or "course"
 
 
+def cdir(course):
+    """The one folder that holds everything for a course, named like 'ELEC1111 Vault'."""
+    name = safe(course)
+    if not name.lower().endswith("vault"):
+        name += " Vault"
+    return vault() / name
+
+
 def stamp():
     return dt.datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
 
 def sub(course, name):
-    d = vault() / safe(course) / name
+    d = cdir(course) / name
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -272,7 +280,7 @@ def cmd_fixcaptions(a):
     """Fix speech-to-text errors with the course's own vocabulary. Unsure cases are marked [ambiguous]."""
     from difflib import SequenceMatcher
 
-    src = vault() / safe(a.course) / "sources"
+    src = cdir(a.course) / "sources"
     text = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in src.glob("*.md")) if src.exists() else ""
     words = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text))
     terms = {w for w in words if len(w) >= 4 and ("_" in w or re.search(r"[a-z][A-Z]", w))}
@@ -462,7 +470,7 @@ def cmd_grab(a):
                 vids.append((vid, f"no captions ({e})"))
             time.sleep(a.pace)
 
-    idx = vault() / safe(a.course) / "index.md"
+    idx = cdir(a.course) / "index.md"
     lines = [f"# Download index for {a.url}", "", f"## Pages ({len(pages)})"]
     lines += [f"- {u} -> sources/{o.name}" for u, o in pages]
     lines += ["", f"## Files ({len(got)})"] + [f"- {u} -> attachments/files/{d.name}" for u, d in got]
@@ -550,11 +558,30 @@ def cmd_pdf(a):
             pdf.ln(2)
         else:
             line(s)
-    out_dir = vault() / safe(a.course)
+    out_dir = cdir(a.course)
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{safe(a.title)}.pdf"
     pdf.output(str(out))
     print(out)
+
+
+def cmd_dedupe(a):
+    """Final check: find exact duplicate files anywhere in the course folder. --delete removes the extras."""
+    import hashlib
+
+    root = cdir(a.course)
+    groups = {}
+    for f in sorted(p for p in root.rglob("*") if p.is_file()):
+        groups.setdefault(hashlib.sha256(f.read_bytes()).hexdigest(), []).append(f)
+    extra = [f for g in groups.values() if len(g) > 1 for f in g[1:]]
+    for g in groups.values():
+        if len(g) > 1:
+            print(f"keep {g[0].relative_to(root)}; duplicate: " + ", ".join(str(f.relative_to(root)) for f in g[1:]))
+    if a.delete:
+        for f in extra:
+            f.unlink()
+    print(f"{len(extra)} duplicate files " + ("deleted" if a.delete else "found (run again with --delete to remove)")
+          + f" in {root}")
 
 
 def cmd_merge(a):
@@ -586,9 +613,9 @@ def cmd_merge(a):
             w.add_page(pg)
         w.add_outline_item(f.stem, start)  # bookmark per source file
         used.append(f)
-    out_dir = vault() / safe(a.course)
+    out_dir = cdir(a.course)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{safe(a.name or a.course)}.pdf"
+    out = out_dir / f"{safe(a.name) if a.name else out_dir.name}.pdf"
     with open(out, "wb") as fh:
         w.write(fh)
     if a.delete_dupes:
@@ -620,6 +647,9 @@ def main():
     p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"))
     p.add_argument("--delay", type=float, default=0)
     p.add_argument("--ocr", action="store_true", help="also write the page text to sources/")
+
+    p = add("dedupe", cmd_dedupe, help="scan the course folder for exact duplicate files")
+    p.add_argument("--delete", action="store_true", help="delete the duplicates")
 
     p = add("merge", cmd_merge, help="merge PDFs from a folder into one PDF named after the course")
     p.add_argument("folder", help="folder holding the downloaded PDFs")
