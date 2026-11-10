@@ -9,7 +9,7 @@ A skill file (`SKILL.md`) plus one local script. It lets an LLM agent summarise 
 
 ## Academic integrity
 
-This tool helps you organise and understand your own study material. For assignments it files the task and gives tips; it only drafts or solves one if you ask. Follow your university's rules on AI use and recording lectures. You are responsible for how you use it.
+This tool helps you organise and understand your own study material. For assignments it files the task and writes a plan; it does not do the assignment for you. Follow your university's rules on AI use and recording lectures. You are responsible for how you use it.
 
 ## Install
 
@@ -21,7 +21,8 @@ This tool helps you organise and understand your own study material. For assignm
 ## Layout in the vault
 
 ```
-<output>/<course>/attachments/   screenshots
+<output>/<course>/*.pdf           lecture notes and assignment plans
+<output>/<course>/attachments/   screenshots and page pictures
 <output>/<course>/sources/       transcripts, slide text
 <output>/<course>/notes/         summaries and homework notes
 ```
