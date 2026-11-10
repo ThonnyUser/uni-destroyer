@@ -501,7 +501,7 @@ def _latin(text):
         text = text.replace(k, v)
     text = text.encode("latin-1", "ignore").decode("latin-1")
     # break very long unbroken strings (URLs) so the PDF can wrap them
-    return re.sub(r"(\S{60})(?=\S)", r"\1 ", text)
+    return re.sub(r"(\S{90})(?=\S)", r"\1 ", text)
 
 
 def cmd_pdf(a):
