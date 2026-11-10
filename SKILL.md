@@ -1,51 +1,57 @@
 ---
 name: homework-vault
-description: Build a study vault for one course. Reads every lecture-notes file into one big notes PDF with links, saves screenshots of all homework with OCR of the questions only, and writes an exam and test preparation PDF. Use when the user gives a course URL, has a course page open, or asks for lecture summaries, homework capture, assignment planning or exam preparation.
+description: Build a study vault for one course: all slides merged into one PDF, a condensed notes PDF with slide references, YouTube links and practice problems, and an exam preparation PDF with a timeline. Optionally captures homework screenshots with OCR of the questions only. Use when the user gives a course URL, has a course page open, or asks for lecture summaries, homework capture, assignment planning or exam preparation.
 ---
 
 # Homework Vault
 
 Work runs locally. `scripts/hw.py` gathers material. **You** read it and write the summaries yourself. Do not call any other summariser.
 
-## The output: one folder, always three parts
+## The output: one folder, three files
 
-Every course gets one folder named after the course, inside Downloads: `~/Downloads/homework-vault/<COURSE> Vault/` (for example `ELEC1111 Vault`). `hw.py` creates it and these three parts every time (`--course ELEC1111` is enough). Put everything for the course here and nowhere else.
+Every course gets one folder named after the course, inside Downloads: `~/Downloads/homework-vault/<COURSE> Vault/` (for example `ELEC1111 Vault`). `hw.py` makes it from `--course ELEC1111`. It ends up holding exactly three PDFs:
 
 ```
 <COURSE> Vault/
-  1 Notes/         <COURSE> Notes.pdf          the big summary
-    Source files/  downloaded lecture notes, page text, transcripts, merged originals
-  2 Homework/      screenshots of all homework, Questions.md, assignment plan PDF
-  3 Exam Prep/     <COURSE> Exam Prep.pdf
+  <COURSE> Slides.pdf      every lecture slide and note, merged into one file, in course order
+  <COURSE> Notes.pdf       the condensed study guide: summaries, YouTube resources, practice problems
+  <COURSE> Exam Prep.pdf   dates, what each exam covers, what to practice, a countdown timeline
+  Homework/                only if homework was captured: screenshots, Questions.md, assignment plan
 ```
 
-### 1 Notes: one big notes PDF
-- **Read every single lecture-notes file.** All of them, every page. Do not sample, skip, or stop early. Extract text with `slides` (pdf, pptx), and look at an image only when a diagram carries meaning.
-- Summarise all of it into **one** PDF: `pdf --course C --title "<COURSE> Notes" --section notes`. Aim for about 30 pages. Scale with the course: more topics, more pages. Say how long it came out.
-- For each topic: overview, key concepts with short plain explanations, definitions and formulas exact as the source states them, worked-example ideas, common mistakes the lecturer warned about.
-- **Include links.** Link every topic to its source: the course page, the lecture-notes file name, the lecture recording, the readings, and **Watch next** videos. Write links as `[label](https://...)`. The `pdf` command makes them clickable.
-- Use slides and notes first. If a lecture has slides or notes, do **not** transcribe its recording (transcripts are the biggest token cost). Transcribe only lectures that have nothing written.
-- Keep the downloaded originals in `1 Notes/Source files/`. `merge` can join them into one PDF there.
+Working files (page text, transcripts, downloads) go in `_work/` and are **deleted at the end** (see Finish).
 
-### 2 Homework: screenshots, and OCR of the questions only
-- Take **one screenshot for every homework page or question**. There may be hundreds. Name each clearly (`--label`), for example `week3-q12`.
-- **OCR only the question itself.** Look at the screenshot, find the question's rectangle, then run `ocr FILE --course C --region X Y W H`. This appends the question text to `2 Homework/Questions.md` under the image name. Never OCR a whole page, and never OCR answers, solutions, menus or page chrome. This keeps the text small.
-- Also here: the **assignment plan PDF** (`pdf --section homework`). It is advice and a plan only (see below).
+### 1. Slides: one file with all the slides
+Collect every lecture-slides or lecture-notes file and join them in order with `merge` (it skips exact duplicates). Do not summarise here. This is the full original, so the Notes can point into it.
 
-### 3 Exam Prep: one preparation PDF
+### 2. Notes: the condensed study guide (the main product)
+Read **every slide of every file**. Do not sample, skip or stop early. Extract text with `slides`, and look at an image only when a diagram carries meaning. Condense hundreds of slides into **one** PDF: `pdf --course C --title "<COURSE> Notes"`. Aim for about 30 pages, scaled to the course. Say how long it came out. For each topic include:
+- a short overview and the key concepts in plain words
+- definitions and formulas, exact as the slides state them
+- common mistakes the lecturer warned about
+- **slide references**, like "Slides p. 120 to 135", pointing into `<COURSE> Slides.pdf`
+- **YouTube and other resources**: title, channel and a clickable link. Include the lecture-recording and revision-video links from the course page. Find extra videos with web search. Never invent a title or URL, and never watch the videos
+- **Practice problems**: (a) the practice and worked problems that appear in the lecture slides, copied or rewritten, with their slide page numbers and the answers where the slides give them; (b) extra problems of the same type that you write, with answers at the end of the PDF. Mark which are from the slides and which are yours
+
+Write every link as `[label](https://...)`. The `pdf` command turns it into a clickable link. Use slides and notes first. If a lecture has slides or notes, do **not** transcribe its recording. Transcribe only lectures that have nothing written.
+
+### 3. Exam Prep: the timeline
 `pdf --course C --title "<COURSE> Exam Prep" --section exam`. Read the course outline, assessments page, quiz and exam pages, past papers, and the notes. Include:
-- **When:** every exam, test, quiz and assignment deadline: date, time, room, length, weight, open or closed book, format. Write `[not published]` when you cannot find it. Never invent a date.
-- **What each covers:** the topics, from the outline and the notes.
-- **What to practice:** question types per topic, which homework and past-paper questions to redo, formulas to memorise, skills to drill.
-- **Past papers and solutions:** list and link them.
-- **A countdown plan** from today to each exam: what to study each day or week, with time for practice papers.
-- Weak spots: topics with the most homework or the hardest questions.
-- Short exam-day tips.
+- **When:** every exam, test, quiz and assignment deadline: date, time, room, length, weight, open or closed book, format. Write `[not published]` when you cannot find it. Never invent a date
+- **What each covers:** the topics, from the outline and the notes
+- **What to practice:** question types per topic, which slide and past-paper problems to redo, formulas to memorise, skills to drill
+- **Past papers and solutions:** list and link them
+- **A countdown timeline** from today to each exam: what to study each day or week, with time for practice papers
+- weak spots, and short exam-day tips
 
-## Always: one container, then a duplicate scan
+### Homework (when the user asks for it)
+Take **one screenshot for every homework page or question**, possibly hundreds, each named clearly (`--label week3-q12`). They go to `Homework/`. **OCR only the question itself:** look at the screenshot, find the question's rectangle, then run `ocr FILE --course C --region X Y W H`. That appends the question text to `Homework/Questions.md`. Never OCR a whole page, answers, solutions, menus or page chrome. The assignment plan PDF (`--section homework`) also goes in `Homework/`.
 
-- Everything for a course goes in its one `<COURSE> Vault` folder.
-- **At the end of every run, scan for duplicates:** `python scripts/hw.py dedupe --course "<COURSE> Vault"`. It lists exact duplicate files. Then run it with `--delete` to remove the extras. Tell the user the count.
+## Finish: clean up (always, last step)
+
+1. Run `python scripts/hw.py finish --course "<COURSE> Vault" --also-delete FILE...`. It removes exact duplicates, deletes the `_work` folder, and deletes every file in `--also-delete`. List there each file this run downloaded outside the vault, such as browser downloads in Downloads. It then prints what the vault holds.
+2. The vault keeps only the three PDFs and `Homework/` (if used). Tell the user what was deleted and how many duplicates were found.
+3. Delete only files this run created. Never delete the user's own files. In **download-only** mode, do not delete anything: just run `dedupe`.
 
 ## Setup (once)
 
@@ -68,7 +74,7 @@ All need `--course <name>`. Each prints the path it wrote. Output goes to the co
 | Download a public page | `python scripts/hw.py fetch URL --course C` (`--depth 1` adds same-site links) |
 | Save text you read in a browser | `python scripts/hw.py save --course C --label L --source URL` with text on stdin |
 | Slides or notes to text | `python scripts/hw.py slides deck.pdf --course C` (pdf, pptx, txt) |
-| Merge PDFs into one (skips duplicates) | `python scripts/hw.py merge FOLDER --glob "*.pdf" --course C` |
+| Merge all slides into `<COURSE> Slides.pdf` (skips duplicates) | `python scripts/hw.py merge FOLDER --glob "*.pdf" --course C` |
 | Picture of a web page (page only) | `python scripts/hw.py webshot URL --course C --label L` (headless Edge or Chrome) |
 | Screenshot of the screen | `python scripts/hw.py shot --course C --label L [--region X Y W H] [--delay 3]` |
 | OCR the question only | `python scripts/hw.py ocr image.png --course C --region X Y W H` |
@@ -79,6 +85,7 @@ All need `--course <name>`. Each prints the path it wrote. Output goes to the co
 | Markdown to PDF | `python scripts/hw.py pdf --course C --title T --section notes\|homework\|exam` with markdown on stdin |
 | Save a markdown note | `python scripts/hw.py note --course C --title T --kind lecture` with markdown on stdin |
 | Duplicate scan | `python scripts/hw.py dedupe --course C [--delete]` |
+| Finish: dedupe, delete working files | `python scripts/hw.py finish --course C --also-delete FILE...` |
 
 Prefer `webshot` over `shot` for web pages. `shot` captures the whole desktop and may include private windows.
 
@@ -94,7 +101,7 @@ Prefer `webshot` over `shot` for web pages. `shot` captures the whole desktop an
 ## Workflow: downloading course files (slides, lecture notes)
 
 1. **One file at a time.** Download each file in its own step: one request, then check that the file arrived (name and size) before the next. Never run a loop that downloads many files in one call: browsers time out, ask "allow multiple downloads", or silently drop files. If the browser asks to allow multiple downloads, ask the user to click Allow, then continue.
-2. Name files clearly: `<COURSE> <NN> <title>`, for example `ELEC1111 03 Topic 2 - Lecture Notes.pdf`, so they sort in course order. Move them into `1 Notes/Source files/`.
+2. Name files clearly: `<COURSE> <NN> <title>`, for example `ELEC1111 03 Topic 2 - Lecture Notes.pdf`, so they sort in course order. Leave them where they land. `merge` reads them, and `finish` deletes them.
 3. Remove duplicates and make one file: `merge` joins PDFs in order into one PDF named after the course, with a bookmark per source file, and skips exact duplicates. Add `--delete-dupes` to delete duplicate files. Ask the user before `--delete-sources`, which deletes the single files after merging.
 
 ## Workflow: videos (only when there are no notes)

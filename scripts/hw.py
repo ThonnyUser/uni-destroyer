@@ -29,19 +29,18 @@ def safe(name):
     return re.sub(r'[<>:"/\|?*]+', "", name).strip() or "course"
 
 
-PARTS = ("1 Notes", "2 Homework", "3 Exam Prep")
-SECTIONS = {"notes": "1 Notes", "sources": "1 Notes/Source files", "lectures": "1 Notes/Source files",
-            "attachments": "2 Homework", "homework": "2 Homework", "exam": "3 Exam Prep"}
+SECTIONS = {"sources": "_work", "lectures": "_work", "notes": "_work",
+            "attachments": "Homework", "homework": "Homework"}
 
 
 def cdir(course):
-    """The one folder for a course, like 'ELEC1111 Vault', always holding the three parts."""
+    """The one folder for a course, like 'ELEC1111 Vault'. It ends with three PDFs
+    (Slides, Notes, Exam Prep) plus an optional Homework folder. '_work' holds temporary files."""
     name = safe(course)
     if not name.lower().endswith("vault"):
         name += " Vault"
     root = vault() / name
-    for part in PARTS:
-        (root / part).mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
     return root
 
 
@@ -595,7 +594,8 @@ def cmd_pdf(a):
             pdf.ln(2)
         else:
             line(s)
-    out = sub(a.course, a.section) / f"{safe(a.title)}.pdf"
+    dest = sub(a.course, "homework") if a.section == "homework" else cdir(a.course)
+    out = dest / f"{safe(a.title)}.pdf"
     pdf.output(str(out))
     print(out)
 
@@ -648,7 +648,8 @@ def cmd_merge(a):
             w.add_page(pg)
         w.add_outline_item(f.stem, start)  # bookmark per source file
         used.append(f)
-    out = sub(a.course, "sources") / f"{safe(a.name) if a.name else cdir(a.course).name}.pdf"
+    base = re.sub(r" Vault$", "", cdir(a.course).name)
+    out = cdir(a.course) / f"{safe(a.name) if a.name else base + ' Slides'}.pdf"
     with open(out, "wb") as fh:
         w.write(fh)
     if a.delete_dupes:
@@ -662,6 +663,29 @@ def cmd_merge(a):
     print(f"{len(used)} files merged, {len(dupes)} exact duplicates skipped"
           + (" and deleted" if a.delete_dupes or a.delete_sources else "")
           + (", sources deleted" if a.delete_sources else "") + f". {len(w.pages)} pages.")
+
+
+def cmd_finish(a):
+    """Last step: remove duplicates, then delete every working file used to build the vault."""
+    import shutil
+
+    root = cdir(a.course)
+    cmd_dedupe(argparse.Namespace(course=a.course, delete=True))
+    work = root / "_work"
+    if work.exists() and not a.keep_work:
+        shutil.rmtree(work)
+        print("deleted working files: _work")
+    for f in a.also_delete or []:
+        p = pathlib.Path(f).expanduser()
+        if p.is_file():
+            p.unlink()
+            print(f"deleted: {p}")
+        else:
+            print(f"skipped (not a file): {p}", file=sys.stderr)
+    print("Vault now holds:")
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            print("  " + str(p.relative_to(root)))
 
 
 def main():
@@ -679,6 +703,10 @@ def main():
     p.add_argument("--monitor", type=int, default=1, help="0 = all screens")
     p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"))
     p.add_argument("--delay", type=float, default=0)
+
+    p = add("finish", cmd_finish, help="last step: dedupe, then delete all working files used to build the vault")
+    p.add_argument("--also-delete", nargs="*", metavar="FILE", help="files this run downloaded elsewhere (for example in Downloads)")
+    p.add_argument("--keep-work", action="store_true", help="keep the _work folder")
 
     p = add("dedupe", cmd_dedupe, help="scan the course folder for exact duplicate files")
     p.add_argument("--delete", action="store_true", help="delete the duplicates")
@@ -747,7 +775,7 @@ def main():
     p = add("pdf", cmd_pdf, help="markdown on stdin to a PDF in one of the three parts")
     p.add_argument("--title", required=True)
     p.add_argument("--section", choices=["notes", "homework", "exam"], default="notes",
-                   help="notes = 1 Notes, homework = 2 Homework, exam = 3 Exam Prep")
+                   help="notes = <course> Notes.pdf, exam = <course> Exam Prep.pdf, homework = Homework folder")
 
     a = ap.parse_args()
     a.fn(a)
