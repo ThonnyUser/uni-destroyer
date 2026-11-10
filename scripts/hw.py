@@ -24,12 +24,17 @@ def slug(s):
     return re.sub(r"-+", "-", re.sub(r"[^\w\-]+", "-", s.strip())).strip("-").lower() or "untitled"
 
 
+def safe(name):
+    """Folder or file name from a course name: keeps case and spaces, drops characters Windows forbids."""
+    return re.sub(r'[<>:"/\|?*]+', "", name).strip() or "course"
+
+
 def stamp():
     return dt.datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
 
 def sub(course, name):
-    d = vault() / slug(course) / name
+    d = vault() / safe(course) / name
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -267,7 +272,7 @@ def cmd_fixcaptions(a):
     """Fix speech-to-text errors with the course's own vocabulary. Unsure cases are marked [ambiguous]."""
     from difflib import SequenceMatcher
 
-    src = vault() / slug(a.course) / "sources"
+    src = vault() / safe(a.course) / "sources"
     text = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in src.glob("*.md")) if src.exists() else ""
     words = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text))
     terms = {w for w in words if len(w) >= 4 and ("_" in w or re.search(r"[a-z][A-Z]", w))}
@@ -457,7 +462,7 @@ def cmd_grab(a):
                 vids.append((vid, f"no captions ({e})"))
             time.sleep(a.pace)
 
-    idx = vault() / slug(a.course) / "index.md"
+    idx = vault() / safe(a.course) / "index.md"
     lines = [f"# Download index for {a.url}", "", f"## Pages ({len(pages)})"]
     lines += [f"- {u} -> sources/{o.name}" for u, o in pages]
     lines += ["", f"## Files ({len(got)})"] + [f"- {u} -> attachments/files/{d.name}" for u, d in got]
@@ -545,9 +550,9 @@ def cmd_pdf(a):
             pdf.ln(2)
         else:
             line(s)
-    out_dir = vault() / slug(a.course)
+    out_dir = vault() / safe(a.course)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{slug(a.title)}.pdf"
+    out = out_dir / f"{safe(a.title)}.pdf"
     pdf.output(str(out))
     print(out)
 
