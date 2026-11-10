@@ -5,7 +5,7 @@ A skill file (`SKILL.md`) plus one local script. It lets an LLM agent summarise 
 - Runs on your machine. Transcription uses `faster-whisper`; screenshots use `mss`.
 - The LLM that loads the skill writes the summaries. No API key is part of this repo.
 - Inputs: a course URL (public, or a page open in your browser when the agent has a browser tool), video links, recordings, live mic audio, slides (pdf/pptx), screenshots.
-- Output: a summary note per lecture with "Watch next" video titles, and a homework note with tips.
+- Output (in your Downloads folder): a notes PDF with lecture summaries and concepts, a picture of the homework page, and an assignment plan PDF. The plan is advice only; it never does the assignment for you.
 
 ## Academic integrity
 
@@ -15,15 +15,15 @@ This tool helps you organise and understand your own study material. For assignm
 
 1. **Install Python 3.12** from https://www.python.org/downloads/ . On Windows, tick "Add python.exe to PATH" in the installer. Check with `python --version`.
 2. Copy this folder into your agent's skills folder (for Claude Code: `~/.claude/skills/homework-vault/`).
-3. Install the packages: `pip install rapidocr-onnxruntime mss trafilatura lxml_html_clean yt-dlp faster-whisper sounddevice numpy pypdf python-pptx`
-4. Set `HW_VAULT` to your vault folder.
+3. Install the packages: `pip install rapidocr-onnxruntime mss trafilatura lxml_html_clean yt-dlp fpdf2 faster-whisper sounddevice numpy pypdf python-pptx`
+4. Optional: set `HW_VAULT` to use another output folder. By default everything goes to `Downloads/homework-vault/<course>/`.
 
 ## Layout in the vault
 
 ```
-<vault>/<course>/attachments/   screenshots
-<vault>/<course>/sources/       transcripts, slide text
-<vault>/<course>/notes/         summaries and homework notes
+<output>/<course>/attachments/   screenshots
+<output>/<course>/sources/       transcripts, slide text
+<output>/<course>/notes/         summaries and homework notes
 ```
 
 ## Licence

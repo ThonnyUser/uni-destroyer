@@ -2,7 +2,7 @@
 """hw.py - local helper for the homework-vault skill.
 
 Gathers material only. The calling LLM reads it and writes the summary.
-Vault path comes from the HW_VAULT environment variable.
+Output goes to HW_VAULT if set, otherwise to ~/Downloads/homework-vault.
 """
 import argparse
 import datetime as dt
@@ -15,15 +15,13 @@ import time
 
 def vault():
     v = os.environ.get("HW_VAULT")
-    if not v:
-        sys.exit("Set HW_VAULT to your vault folder first.")
-    p = pathlib.Path(v).expanduser()
+    p = pathlib.Path(v).expanduser() if v else pathlib.Path.home() / "Downloads" / "homework-vault"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def slug(s):
-    return re.sub(r"[^\w\-]+", "-", s.strip()).strip("-").lower() or "untitled"
+    return re.sub(r"-+", "-", re.sub(r"[^\w\-]+", "-", s.strip())).strip("-").lower() or "untitled"
 
 
 def stamp():
@@ -218,10 +216,22 @@ def cmd_captions(a):
         "subtitlesformat": "vtt",
         "outtmpl": str(d / f"{tag}-%(id)s.%(ext)s"),
         "quiet": True,
+        "noprogress": True,
     }
-    with yt_dlp.YoutubeDL(opts) as y:
-        y.download([a.url])
-    vtts = glob.glob(str(d / f"{tag}-*.vtt"))
+    vtts = []
+    for attempt in range(a.retries):
+        try:
+            with yt_dlp.YoutubeDL(opts) as y:
+                y.download([a.url])
+        except Exception as e:
+            print(f"caption download failed: {e}", file=sys.stderr)
+        vtts = glob.glob(str(d / f"{tag}-*.vtt"))
+        if vtts:
+            break
+        if attempt + 1 < a.retries:
+            wait = 45 * (attempt + 1)  # YouTube answers HTTP 429 when asked too fast
+            print(f"waiting {wait}s then retrying", file=sys.stderr)
+            time.sleep(wait)
     if vtts:
         lines, last = [], ""
         for raw in open(vtts[0], encoding="utf-8"):
@@ -237,14 +247,109 @@ def cmd_captions(a):
             os.remove(v)
         print(out)
         return
+    if a.captions_only:
+        sys.exit("No captions found (skipped audio download).")
     print("No captions found. Downloading audio to transcribe.", file=sys.stderr)
-    opts = {"format": "bestaudio", "outtmpl": str(d / f"{tag}-%(id)s.%(ext)s"), "quiet": True}
+    opts = {"format": "bestaudio", "outtmpl": str(d / f"{tag}-%(id)s.%(ext)s"), "quiet": True, "noprogress": True}
     with yt_dlp.YoutubeDL(opts) as y:
         y.download([a.url])
     audio = [p for p in glob.glob(str(d / f"{tag}-*")) if not p.endswith(".txt")]
     if not audio:
         sys.exit("Download failed.")
     print(_transcribe(audio[0], a.course, a.model))
+
+
+def cmd_webshot(a):
+    """Picture of a web page only (not the desktop), using headless Edge or Chrome."""
+    import shutil
+    import subprocess
+
+    names = ["msedge", "chrome", "google-chrome", "chromium"]
+    paths = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    ]
+    exe = next((shutil.which(n) for n in names if shutil.which(n)), None) or next(
+        (p for p in paths if os.path.exists(p)), None)
+    if not exe:
+        sys.exit("No Edge or Chrome found. Use `shot` instead.")
+    out = sub(a.course, "attachments") / f"{stamp()}-{slug(a.label)}.png"
+    import tempfile
+
+    # a throwaway profile makes the browser start fresh even if the user's browser is open
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as prof:
+        subprocess.run([exe, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+                        f"--user-data-dir={prof}", f"--window-size={a.width},{a.height}",
+                        f"--screenshot={out}", a.url],
+                       timeout=90, capture_output=True)
+        for _ in range(240):  # the browser may hand the work to a child process
+            if out.exists() and out.stat().st_size > 0:
+                break
+            time.sleep(0.5)
+    if not out.exists():
+        sys.exit("Browser made no screenshot.")
+    print(out)
+    print(f"![[{out.name}]]")
+
+
+def _latin(text):
+    """Core PDF fonts are latin-1 only: swap common symbols, drop the rest."""
+    for k, v in {"’": "'", "‘": "'", "“": '"', "”": '"', "–": "-",
+                 "—": "-", "→": "->", "•": "-", "…": "...", " ": " "}.items():
+        text = text.replace(k, v)
+    text = text.encode("latin-1", "ignore").decode("latin-1")
+    # break very long unbroken strings (URLs) so the PDF can wrap them
+    return re.sub(r"(\S{60})(?=\S)", r"\1 ", text)
+
+
+def cmd_pdf(a):
+    from fpdf import FPDF
+
+    md = sys.stdin.read().strip()
+    if not md:
+        sys.exit("Pipe the markdown into stdin.")
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_title(a.title)
+
+    def line(txt, size=11, style="", indent=0, font="Helvetica", h=6):
+        pdf.set_font(font, style, size)
+        pdf.set_x(pdf.l_margin + indent)
+        pdf.multi_cell(0, h, _latin(txt), new_x="LMARGIN", new_y="NEXT")
+
+    code = False
+    for raw in md.splitlines():
+        s = raw.rstrip()
+        if s.startswith("```"):
+            code = not code
+            continue
+        if code:
+            line(s or " ", 9, font="Courier", h=5)
+            continue
+        s = s.replace("**", "").replace("`", "")
+        if s.startswith("# "):
+            pdf.ln(2); line(s[2:], 18, "B", h=9); pdf.ln(1)
+        elif s.startswith("## "):
+            pdf.ln(3); line(s[3:], 14, "B", h=8)
+        elif s.startswith("### "):
+            pdf.ln(2); line(s[4:], 12, "B", h=7)
+        elif re.match(r"\s*[-*] ", s):
+            n = len(s) - len(s.lstrip())
+            line("- " + s.strip()[2:], indent=4 + n * 2)
+        elif s.startswith("> "):
+            line(s[2:], style="I", indent=4)
+        elif not s.strip():
+            pdf.ln(2)
+        else:
+            line(s)
+    out_dir = vault() / slug(a.course)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{slug(a.title)}.pdf"
+    pdf.output(str(out))
+    print(out)
 
 
 def main():
@@ -263,6 +368,12 @@ def main():
     p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"))
     p.add_argument("--delay", type=float, default=0)
     p.add_argument("--ocr", action="store_true", help="also write the page text to sources/")
+
+    p = add("webshot", cmd_webshot, help="picture of a web page (headless browser, page only)")
+    p.add_argument("url")
+    p.add_argument("--label", default="page")
+    p.add_argument("--width", type=int, default=1200)
+    p.add_argument("--height", type=int, default=4000)
 
     p = add("ocr", cmd_ocr, help="read text from an existing image")
     p.add_argument("file")
@@ -293,7 +404,12 @@ def main():
     p = add("captions", cmd_captions, help="YouTube/video URL to transcript (captions, else audio)")
     p.add_argument("url")
     p.add_argument("--lang", default="en")
+    p.add_argument("--captions-only", action="store_true", help="never fall back to audio download")
+    p.add_argument("--retries", type=int, default=3, help="tries when YouTube rate-limits")
     p.add_argument("--model", default="small")
+
+    p = add("pdf", cmd_pdf, help="markdown on stdin to a PDF in <vault>/<course>/")
+    p.add_argument("--title", required=True)
 
     a = ap.parse_args()
     a.fn(a)
