@@ -57,17 +57,17 @@ This tool helps you organise and understand your own study material. For assignm
 
 ## What you get
 
-One folder per course, named after the course, in your Downloads folder. It ends up with three PDFs:
+One folder per course, named after the course, in your Downloads folder. It ends up with four PDFs:
 
 ```
 Downloads/homework-vault/ELEC1111 Vault/
   ELEC1111 Slides.pdf      every lecture slide merged into one file
   ELEC1111 Notes.pdf       the condensed study guide (about 30 pages): summaries, slide references, YouTube links, practice problems
   ELEC1111 Exam Prep.pdf   exam and test dates, what each covers, what to practice, a countdown timeline
-  Homework/                optional: screenshots of homework, OCR of the questions only, assignment plan
+  ELEC1111 Homework.pdf    optional: every homework screenshot in one file, with the questions (OCR of the question only) as text
 ```
 
-At the end the tool deletes every temporary file it used (downloads, page text, transcripts) and removes duplicates. Slides are used instead of transcribing recordings, which saves a lot of tokens.
+At the end the tool deletes every temporary file it used (the single lecture PDFs, page text, transcripts, loose screenshots) and removes duplicates. Slides are used instead of transcribing recordings, which saves a lot of tokens.
 
 ## Licence
 

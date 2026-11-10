@@ -1,6 +1,6 @@
 ---
 name: homework-vault
-description: Build a study vault for one course: all slides merged into one PDF, a condensed notes PDF with slide references, YouTube links and practice problems, and an exam preparation PDF with a timeline. Optionally captures homework screenshots with OCR of the questions only. Use when the user gives a course URL, has a course page open, or asks for lecture summaries, homework capture, assignment planning or exam preparation.
+description: Build a study vault for one course: all slides merged into one PDF, a condensed notes PDF with slide references, YouTube links and practice problems, and an exam preparation PDF with a timeline. Optionally adds one PDF of all homework screenshots with OCR of the questions only. Use when the user gives a course URL, has a course page open, or asks for lecture summaries, homework capture, assignment planning or exam preparation.
 ---
 
 # Homework Vault
@@ -9,17 +9,17 @@ Work runs locally. `scripts/hw.py` gathers material. **You** read it and write t
 
 ## The output: one folder, three files
 
-Every course gets one folder named after the course, inside Downloads: `~/Downloads/homework-vault/<COURSE> Vault/` (for example `ELEC1111 Vault`). `hw.py` makes it from `--course ELEC1111`. It ends up holding exactly three PDFs:
+Every course gets one folder named after the course, inside Downloads: `~/Downloads/homework-vault/<COURSE> Vault/` (for example `ELEC1111 Vault`). `hw.py` makes it from `--course ELEC1111`. It ends up holding exactly four PDFs:
 
 ```
 <COURSE> Vault/
   <COURSE> Slides.pdf      every lecture slide and note, merged into one file, in course order
   <COURSE> Notes.pdf       the condensed study guide: summaries, YouTube resources, practice problems
   <COURSE> Exam Prep.pdf   dates, what each exam covers, what to practice, a countdown timeline
-  Homework/                only if homework was captured: screenshots, Questions.md, assignment plan
+  <COURSE> Homework.pdf    every homework screenshot in one file, with the questions as text (only if homework was captured)
 ```
 
-Working files (page text, transcripts, downloads) go in `_work/` and are **deleted at the end** (see Finish).
+Working files (page text, transcripts, downloads, loose screenshots, the individual lecture PDFs) are temporary. They go in `_work/` or Downloads and are **deleted at the end** (see Finish). Only the four PDFs stay.
 
 ### 1. Slides: one file with all the slides
 Collect every lecture-slides or lecture-notes file and join them in order with `merge` (it skips exact duplicates). Do not summarise here. This is the full original, so the Notes can point into it.
@@ -42,15 +42,17 @@ Write every link as `[label](https://...)`. The `pdf` command turns it into a cl
 - **What to practice:** question types per topic, which slide and past-paper problems to redo, formulas to memorise, skills to drill
 - **Past papers and solutions:** list and link them
 - **A countdown timeline** from today to each exam: what to study each day or week, with time for practice papers
-- weak spots, and short exam-day tips
+- weak spots, short exam-day tips, and the **Assignment plans** (see below)
 
-### Homework (when the user asks for it)
-Take **one screenshot for every homework page or question**, possibly hundreds, each named clearly (`--label week3-q12`). They go to `Homework/`. **OCR only the question itself:** look at the screenshot, find the question's rectangle, then run `ocr FILE --course C --region X Y W H`. That appends the question text to `Homework/Questions.md`. Never OCR a whole page, answers, solutions, menus or page chrome. The assignment plan PDF (`--section homework`) also goes in `Homework/`.
+### 4. Homework: one file of pictures (when the user asks for it)
+Take **one screenshot for every homework page or question**, possibly hundreds, each named clearly (`--label week3-q12`). They go to `_work/Homework/`. **OCR only the question itself:** look at the screenshot, find the question's rectangle, then run `ocr FILE --course C --region X Y W H`. That appends the question text to `Questions.md`. Never OCR a whole page, answers, solutions, menus or page chrome.
+
+When all screenshots are taken, run `pics --course C`. It puts every screenshot into **one PDF**, `<COURSE> Homework.pdf` (one image per page, long pages sliced, a bookmark per question, the question text at the end). The loose pictures are then deleted by `finish`.
 
 ## Finish: clean up (always, last step)
 
 1. Run `python scripts/hw.py finish --course "<COURSE> Vault" --also-delete FILE...`. It removes exact duplicates, deletes the `_work` folder, and deletes every file in `--also-delete`. List there each file this run downloaded outside the vault, such as browser downloads in Downloads. It then prints what the vault holds.
-2. The vault keeps only the three PDFs and `Homework/` (if used). Tell the user what was deleted and how many duplicates were found.
+2. The vault keeps only the four PDFs (the Homework PDF only if homework was captured). Tell the user what was deleted and how many duplicates were found.
 3. Delete only files this run created. Never delete the user's own files. In **download-only** mode, do not delete anything: just run `dedupe`.
 
 ## Setup (once)
@@ -78,11 +80,12 @@ All need `--course <name>`. Each prints the path it wrote. Output goes to the co
 | Picture of a web page (page only) | `python scripts/hw.py webshot URL --course C --label L` (headless Edge or Chrome) |
 | Screenshot of the screen | `python scripts/hw.py shot --course C --label L [--region X Y W H] [--delay 3]` |
 | OCR the question only | `python scripts/hw.py ocr image.png --course C --region X Y W H` |
+| All homework screenshots into one PDF | `python scripts/hw.py pics --course C` |
 | Video link to transcript | `python scripts/hw.py captions URL --course C --captions-only` |
 | Auto-correct a transcript | `python scripts/hw.py fixcaptions transcript.txt --course C` |
 | Transcribe a recording | `python scripts/hw.py transcribe file.mp4 --course C` |
 | Record live audio | `python scripts/hw.py record --course C` (Ctrl+C stops) |
-| Markdown to PDF | `python scripts/hw.py pdf --course C --title T --section notes\|homework\|exam` with markdown on stdin |
+| Markdown to PDF | `python scripts/hw.py pdf --course C --title T --section notes\|exam` with markdown on stdin |
 | Save a markdown note | `python scripts/hw.py note --course C --title T --kind lecture` with markdown on stdin |
 | Duplicate scan | `python scripts/hw.py dedupe --course C [--delete]` |
 | Finish: dedupe, delete working files | `python scripts/hw.py finish --course C --also-delete FILE...` |
@@ -122,11 +125,11 @@ Suggest videos by **title and channel only**. Never watch or transcribe them. Us
 
 ## Assignment plan (advice only)
 
-For each assignment write a plan, never a solution. **Never do the assignment for the user.** No solution code, no answers, no finished drafts. If asked to solve it, say you only give a plan, and make the plan more detailed. Include: the task in your own words; due date, late penalty, weight and marks split; the rules, including any ban on AI help (remind the student to write their own work); a day-by-day schedule from today to the due date with stage order and submit points; which lectures to review first; habits that save marks (test each part, submit early, style rules); common mistakes; how to get unstuck. Save with `pdf --section homework`.
+For each assignment write a plan, never a solution. **Never do the assignment for the user.** No solution code, no answers, no finished drafts. If asked to solve it, say you only give a plan, and make the plan more detailed. Include: the task in your own words; due date, late penalty, weight and marks split; the rules, including any ban on AI help (remind the student to write their own work); a day-by-day schedule from today to the due date with stage order and submit points; which lectures to review first; habits that save marks (test each part, submit early, style rules); common mistakes; how to get unstuck. Put the plans in the Exam Prep PDF, under a heading **Assignment plans**, one plan per assignment.
 
 ## Past assignments
 
-When the course site links earlier assignments or earlier terms, analyse the specs too: what each asked, stages, mark split, which topics they test, patterns that repeat. Put it in the exam and test preparation PDF or the plan. Analyse specs only. Never collect or reuse other students' solutions.
+When the course site links earlier assignments or earlier terms, analyse the specs too: what each asked, stages, mark split, which topics they test, patterns that repeat. Put it in the exam and test preparation PDF. Analyse specs only. Never collect or reuse other students' solutions.
 
 ## Cost warning (tell the user before a big run)
 
