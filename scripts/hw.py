@@ -715,47 +715,88 @@ def cmd_merge(a):
           + (", sources deleted" if a.delete_sources else "") + f". {len(w.pages)} pages.")
 
 
-def _question_pictures(pdf, scale, colors, keep_chrome):
-    """Yield one picture per page, cropped to the question content only. Headers, footers, logos,
-    page numbers and watermarks are dropped: objects in the top or bottom band that repeat on other
-    pages (or any object in the band of a single-page file), and page-sized background objects."""
-    n = len(pdf)
-    top_band, bottom_band = 0.115, 0.075
+def _question_pictures(pdf, scale, colors, keep_chrome, max_px=1800):
+    """Pictures of the questions only, never with a circuit cut in half.
+    Per page: drop a banner at the top (wide objects touching the top edge, such as a logo bar), a footer
+    at the bottom, small logos and page numbers in the header and footer strips, and page-sized backgrounds.
+    Then join all pages into one long strip and cut it only on blank rows, so a circuit that a page
+    break split in two is whole again."""
+    import numpy as np
+    from PIL import Image
+
     pages = []
-    for i in range(n):
+    for i in range(len(pdf)):
         page = pdf[i]
         w, h = page.get_size()
-        objs = []
-        for obj in page.get_objects(max_depth=1):
-            l, b, r, t = obj.get_bounds()
-            key = (obj.type, round(l / 6), round(b / 6), round(r / 6), round(t / 6))
-            objs.append((key, (l, b, r, t)))
-        pages.append((page, w, h, objs))
-    seen = {}
-    for _, _, _, objs in pages:
-        for key, _ in objs:
-            seen[key] = seen.get(key, 0) + 1
-    for page, w, h, objs in pages:
-        keep = []
-        for key, (l, b, r, t) in objs:
-            in_band = b > h * (1 - top_band) or t < h * bottom_band  # wholly inside the header or footer strip
-            repeated = True
-            background = (r - l) * (t - b) > 0.85 * w * h
-            watermark = (r - l) * (t - b) > 0.5 * w * h and seen[key] >= 2
-            if not keep_chrome and (background or watermark or in_band):
-                continue
-            keep.append((l, b, r, t))
-        img = page.render(scale=scale).to_pil().convert("RGB")
+        objs = [o.get_bounds() for o in page.get_objects(max_depth=1)]
+        drop = [False] * len(objs)
+        if not keep_chrome:
+            for k, (l, b, r, t) in enumerate(objs):
+                if (r - l) * (t - b) > 0.85 * w * h:  # background
+                    drop[k] = True
+            top, moved = h, True
+            while moved:  # banner: wide objects touching the top edge, then wide ones touching those
+                moved = False
+                for k, (l, b, r, t) in enumerate(objs):
+                    if not drop[k] and r - l > 0.5 * w and t >= top - 0.06 * h and t - b < 0.3 * h and b < top - 1:
+                        top, moved = b, True
+            bottom, moved = 0, True
+            while moved:  # footer: the same from the bottom edge
+                moved = False
+                for k, (l, b, r, t) in enumerate(objs):
+                    if not drop[k] and r - l > 0.5 * w and b <= bottom + 0.06 * h and t - b < 0.3 * h and t > bottom + 1:
+                        bottom, moved = t, True
+            for k, (l, b, r, t) in enumerate(objs):
+                if top < h and b >= top - 1:
+                    drop[k] = True
+                if bottom > 0 and t <= bottom + 1:
+                    drop[k] = True
+                if b > h * (1 - 0.115) or t < h * 0.075:  # wholly inside a thin header or footer strip
+                    drop[k] = True
+        keep = [bd for k, bd in enumerate(objs) if not drop[k]]
         if keep:
-            pad = 8
-            l = max(0, min(k[0] for k in keep) - pad)
-            r = min(w, max(k[2] for k in keep) + pad)
-            b = max(0, min(k[1] for k in keep) - pad)
-            t = min(h, max(k[3] for k in keep) + pad)
-            img = img.crop((int(l * scale), int((h - t) * scale), int(r * scale), int((h - b) * scale)))
-        if colors:
-            img = img.quantize(colors=colors)
-        yield img
+            pad = 6
+            pages.append((page, w, h, max(0, min(k[0] for k in keep) - pad), min(w, max(k[2] for k in keep) + pad),
+                          max(0, min(k[1] for k in keep) - pad), min(h, max(k[3] for k in keep) + pad)))
+    if not pages:
+        return
+    left = min(p[3] for p in pages)
+    right = max(p[4] for p in pages)
+    pieces = []
+    for page, w, h, _, _, b, t in pages:
+        img = page.render(scale=scale).to_pil().convert("RGB")
+        pieces.append(img.crop((int(left * scale), int((h - t) * scale), int(right * scale), int((h - b) * scale))))
+    gap = 8
+    strip = Image.new("RGB", (pieces[0].width, sum(p.height for p in pieces) + gap * (len(pieces) - 1)), "white")
+    y = 0
+    for p in pieces:
+        strip.paste(p, (0, y))
+        y += p.height + gap
+    ink = (np.asarray(strip.convert("L")) < 200).any(axis=1)
+    runs, start = [], None  # blank runs: (start, end) of rows with no ink
+    for row, has_ink in enumerate(list(ink) + [True]):
+        if not has_ink and start is None:
+            start = row
+        if has_ink and start is not None:
+            if row - start >= 8:
+                runs.append((start, row))
+            start = None
+    cuts, pos = [0], 0
+    while strip.height - pos > max_px:
+        window = [r for r in runs if pos + 0.4 * max_px <= (r[0] + r[1]) / 2 <= pos + max_px]
+        if not window:
+            window = [r for r in runs if (r[0] + r[1]) / 2 > pos + 0.4 * max_px]  # no gap in reach: take the next one
+        pos = int((max(window, key=lambda r: r[1] - r[0])[0] + max(window, key=lambda r: r[1] - r[0])[1]) / 2) if window else pos + max_px
+        cuts.append(pos)
+    cuts.append(strip.height)
+    for lo, hi in zip(cuts, cuts[1:]):
+        part = strip.crop((0, lo, strip.width, hi))
+        rows = np.asarray(part.convert("L")) < 200
+        used = np.where(rows.any(axis=1))[0]
+        if not len(used):
+            continue
+        part = part.crop((0, max(0, used[0] - 6), part.width, min(part.height, used[-1] + 7)))
+        yield part.quantize(colors=colors) if colors else part
 
 
 def cmd_pdfpics(a):
@@ -767,7 +808,7 @@ def cmd_pdfpics(a):
     label = safe(a.label or pathlib.Path(a.file).stem)
     d = sub(a.course, "attachments", a.group)
     for i, img in enumerate(_question_pictures(pdf, a.scale, a.colors, a.keep_chrome)):
-        img.save(d / f"{label} p{i + 1:02d}.png", optimize=True)
+        img.save(d / f"{label} {i + 1:02d}.png", optimize=True)
     if not a.no_text:
         from pypdf import PdfReader
 
@@ -775,13 +816,14 @@ def cmd_pdfpics(a):
         title = f"{a.group}/{label}" if a.group else label
         with open(sub(a.course, "attachments") / "Questions.md", "a", encoding="utf-8") as f:
             f.write(f"## {title}\n\n{text}\n\n")
-    print(f"{label}: {len(pdf)} pictures in {d.relative_to(cdir(a.course)).as_posix()}")
+    print(f"{label}: {i + 1} pictures in {d.relative_to(cdir(a.course)).as_posix()}")
 
 
 def cmd_slidepics(a):
     """Pictures of the practice problems in lecture slides: the question text and the circuit only.
-    Finds slides titled 'Example n' or 'Practice problem n', then drops the title, the worked-solution
-    note, the answer box, the page number and the logo. Question text goes to Homework/Questions.md."""
+    Finds slides titled 'Example n' or 'Practice problem n' and keeps the whole question: title, every line
+    of text and the figure. It drops only the answer box, the page number and the logo.
+    Question text goes to Homework/Questions.md."""
     import pypdfium2 as pdfium
 
     pdf = pdfium.PdfDocument(a.file)
@@ -810,7 +852,7 @@ def cmd_slidepics(a):
             return tp.get_charbox(hit[0]) if hit else None
 
         for i, (o, (l, b, r, t)) in enumerate(objs):
-            if (r - l) * (t - b) > 0.85 * w * h or b > h * 0.87:  # background, slide title
+            if (r - l) * (t - b) > 0.85 * w * h:  # the page background
                 drop.add(i)
             if l > w * 0.85 and t < h * 0.16:  # logo and page number in the bottom-right corner
                 drop.add(i)
@@ -823,7 +865,6 @@ def cmd_slidepics(a):
             for i, (o, (l, b, r, t)) in enumerate(objs):
                 if l >= area[0] - 3 and b >= area[1] - 3 and r <= area[2] + 3 and t <= area[3] + 3:
                     drop.add(i)
-        note = box_of("Worked solutions")  # painted over below, because it shares a text object with the question
         keep = [bd for i, (o, bd) in enumerate(objs) if i not in drop]
         if not keep:
             continue
@@ -833,15 +874,6 @@ def cmd_slidepics(a):
         b = max(0, min(k[1] for k in keep) - pad)
         t = min(h, max(k[3] for k in keep) + pad)
         img = page.render(scale=a.scale).to_pil().convert("RGB")
-        if note:  # white out the "(Worked solutions of examples ...)" line, but not any figure on the same rows
-            from PIL import ImageDraw
-
-            y0, y1 = note[1] - 3, note[3] + 3
-            x_end = w
-            for k, (o, (ol, ob, orr, ot)) in enumerate(objs):
-                if o.type != 1 and k not in drop and ob < y1 and ot > y0 and orr - ol < 0.85 * w:
-                    x_end = min(x_end, ol - 2)
-            ImageDraw.Draw(img).rectangle([0, int((h - y1) * a.scale), int(x_end * a.scale), int((h - y0) * a.scale)], fill="white")
         img = img.crop((int(l * a.scale), int((h - t) * a.scale), int(r * a.scale), int((h - b) * a.scale)))
         if a.colors:
             img = img.quantize(colors=a.colors)
