@@ -48,10 +48,16 @@ Write every link as `[label](https://...)`. The `pdf` command turns it into a cl
 ### 4. Homework: a folder of pictures, sorted by week (when the user asks for it)
 Take **one screenshot for every homework page or question**, possibly hundreds, each named clearly (`--label q12`). Sort them into subfolders with `--group`: by week when you can (`--group "Week 3"`), otherwise by topic, tutorial, lab or quiz. They land in `Homework/<group>/`. Keep the pictures as files. Do not merge them into a PDF.
 
+**Where homework comes from.** Look for workshop sheets, tutorials, problem sets and quizzes in every topic section. For a homework PDF, download it (one file at a time, see below) and run `pdfpics FILE --course C --group "Week 3" --label "Workshop 2"`. It turns every page into a picture in `Homework/<group>/` and saves the PDF's own text under the same name in `Questions.md`, so no OCR is needed for text PDFs. Group by the teaching week the work belongs to (use the course schedule: topic numbers and week numbers can differ). Do not picture PDFs that are only solutions: use `--no-text` or skip them.
+
+**Quizzes.** Take pictures of the quiz information (rules, dates, platform instructions) into `Homework/Quizzes/`. Do **not** start or open a live quiz attempt, and never answer a quiz for the user. Quizzes are often on an external platform behind its own login. If the course outline marks assessments "No Assistance" (no generative AI), say so to the user. This tool is for studying, not for answering assessed work.
+
 **OCR only the question itself:** look at the screenshot, find the question's rectangle, then run `ocr FILE --course C --region X Y W H`. That appends the question text to `Homework/Questions.md`, under the picture's folder and file name. Never OCR a whole page, answers, solutions, menus or page chrome.
 
 ### 5. Assignments: a plan for each take-home assignment (a folder)
 Find out whether the course has take-home assignments (projects, reports, coding tasks). If **all assessments are tests and exams, leave `Assignments/` empty** and say so.
+
+**Labs count too.** If the course has marked labs, write a **Lab Guide** PDF for `Assignments/` with `pdf --section assignment`, even if there are no other take-home assignments. Read the course outline, the lab student guide and the lab manual (introductions and component lists are enough). Include: how labs are marked (checkpoints, marks, attendance, catch-up rules), what to buy and bring, safety rules, and for each lab its aims, parts, which lecture topics to revise, and how to prepare. Include the hurdle test and the final lab exam. Give no pre-lab answers and no measurements. Remind the student that lab work is individual.
 
 If there are assignments, write a plan for **each** one with `pdf --course C --title "<Assignment name> Plan" --section assignment`. Scrape the whole assignment page first: open every hidden section with `expand.js`, and read every stage, step, rule and marking rule. The plan gives tips and advice on how to tackle it. **Never do the assignment for the user.** No solution code, no answers, no pseudo-code of the solution, no finished drafts. **Never open, edit or write the student's own code or work files.** If asked to solve it, say you only give a plan, and make the plan more detailed. Include:
 - the task in your own words, and every stage or step from the page, in order, with what each one asks for
@@ -94,6 +100,7 @@ All need `--course <name>`. Each prints the path it wrote. Output goes to the co
 | Merge all slides into `<COURSE> Slides.pdf` (skips duplicates) | `python scripts/hw.py merge FOLDER --glob "*.pdf" --course C` |
 | Picture of a web page (page only) | `python scripts/hw.py webshot URL --course C --label L [--group "Week 3"]` (headless Edge or Chrome) |
 | Screenshot of the screen | `python scripts/hw.py shot --course C --label L [--group "Week 3"] [--region X Y W H] [--delay 3]` |
+| Homework PDF into pictures by week (and its text) | `python scripts/hw.py pdfpics FILE --course C --group "Week 3" --label "Workshop 2"` |
 | OCR the question only | `python scripts/hw.py ocr image.png --course C --region X Y W H` |
 | Video link to transcript | `python scripts/hw.py captions URL --course C --captions-only` |
 | Auto-correct a transcript | `python scripts/hw.py fixcaptions transcript.txt --course C` |
@@ -117,9 +124,13 @@ Prefer `webshot` over `shot` for web pages. `shot` captures the whole desktop an
 
 ## Workflow: downloading course files (slides, lecture notes)
 
-1. **One file at a time.** Download each file in its own step: one request, then check that the file arrived (name and size) before the next. Never run a loop that downloads many files in one call: browsers time out, ask "allow multiple downloads", or silently drop files. If the browser asks to allow multiple downloads, ask the user to click Allow, then continue.
+1. **One file at a time.** Use `scripts/download.js` in the logged-in page (it saves to the browser's Downloads folder and finds the real file behind Moodle "resource" links). Name every download starting with `hwtmp`, so `finish --also-delete hwtmp*` can remove them. Download each file in its own step: one request, then check that the file arrived (name and size) before the next. Never run a loop that downloads many files in one call: browsers time out, ask "allow multiple downloads", or silently drop files. If the browser asks to allow multiple downloads, ask the user to click Allow, then continue.
 2. Name files clearly: `<COURSE> <NN> <title>`, for example `ELEC1111 03 Topic 2 - Lecture Notes.pdf`, so they sort in course order. Leave them where they land. `merge` reads them, and `finish` deletes them.
 3. Remove duplicates and make one file: `merge` joins PDFs in order into one PDF named after the course, with a bookmark per source file, and skips exact duplicates. Add `--delete-dupes` to delete duplicate files. Ask the user before `--delete-sources`, which deletes the single files after merging.
+
+## Optional: local receiver (a browser page sends files straight into the vault)
+
+`python scripts/hw.py receive --course C` starts a small server on 127.0.0.1 and prints a token. `scripts/send.js` lets a logged-in page post files and pictures to it. Chrome may block this until the user allows access to the local network, and in testing the prompt blocked the page. If the page's request hangs, stop and use `scripts/download.js` instead.
 
 ## Workflow: videos (only when there are no notes)
 
@@ -145,7 +156,7 @@ When the course site links earlier assignments or earlier terms, analyse the spe
 
 This skill burns many tokens, because you must read the material:
 - one lecture transcript: about 12,000 words, roughly 16,000 tokens
-- reading **every** lecture-notes file of one course: for example ten files totalling 393 pages, roughly 150,000 to 250,000 tokens
+- reading **every** lecture-notes file of one course as text: for example ten files totalling 393 slides were about 28,500 words, roughly 40,000 tokens. The course outline, a lab manual of about 20,000 words, and past exams add more
 - one assignment page with hidden sections opened: roughly 20,000 tokens
 - every extra step re-reads the whole conversation, so real usage is higher
 

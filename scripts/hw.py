@@ -172,7 +172,7 @@ def cmd_slides(a):
 
 
 def cmd_note(a):
-    body = sys.stdin.read().strip()
+    body = sys.stdin.buffer.read().decode("utf-8", errors="replace").strip()
     if not body:
         sys.exit("Pipe the markdown note into stdin.")
     d = sub(a.course, "notes")
@@ -183,7 +183,7 @@ def cmd_note(a):
 
 
 def cmd_save(a):
-    text = sys.stdin.read().strip()
+    text = sys.stdin.buffer.read().decode("utf-8", errors="replace").strip()
     if not text:
         sys.exit("Pipe the text into stdin.")
     out = sub(a.course, "sources") / f"{stamp()}-{slug(a.label)}.md"
@@ -529,10 +529,40 @@ def cmd_webshot(a):
     print(f"![[{out.name}]]")
 
 
+UNICODE_FONT = {"on": False}
+
+
+def _unicode_fonts():
+    """Regular, bold and italic TrueType fonts that hold Greek letters and maths symbols, or None."""
+    sets = [("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf", "C:/Windows/Fonts/ariali.ttf"),
+            ("/Library/Fonts/Arial Unicode.ttf",) * 3,
+            ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf")]
+    return next((s for s in sets if all(os.path.exists(p) for p in s)), None)
+
+
 def _plain(text):
-    """Core PDF fonts are latin-1 only: swap common symbols, drop the rest."""
+    """Swap typographic quotes and bullets. With only the core PDF fonts (latin-1), turn
+    common maths symbols into plain words and drop the rest."""
     for k, v in {"’": "'", "‘": "'", "“": '"', "”": '"', "–": "-",
-                 "—": "-", "→": "->", "•": "-", "…": "...", " ": " "}.items():
+                 "—": "-", "•": "-", "…": "...", chr(160): " "}.items():
+        text = text.replace(k, v)
+    if UNICODE_FONT["on"]:
+        # common TrueType fonts lack sub/superscripts and the angle sign: write them as plain text
+        sub_map = dict(zip("₀₁₂₃₄₅₆₇₈₉₊₋", "0123456789+-"))
+        sup_map = dict(zip("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻", "0123456789+-"))
+        text = "".join(sub_map.get(c, c) for c in text)
+
+        def _sup(m):
+            run = m.group(0)
+            return run if all(c in "¹²³" for c in run) else "^" + "".join(sup_map[c] for c in run)
+
+        text = re.sub("[" + "".join(sup_map) + "]+", _sup, text)
+        return text.replace("∠", " angle ")
+    for k, v in {"→": "->", "Ω": "ohm", "τ": "tau", "ω": "omega", "π": "pi",
+                 "∠": "angle ", "Δ": "Delta", "Σ": "sum", "≈": "~", "≤": "<=",
+                 "≥": ">=", "∞": "inf", "√": "sqrt", "θ": "theta", "φ": "phi",
+                 "μ": "u", "∫": "int", "≠": "!=", "−": "-"}.items():
         text = text.replace(k, v)
     return text.encode("latin-1", "ignore").decode("latin-1")
 
@@ -545,17 +575,25 @@ def _latin(text):
 def cmd_pdf(a):
     from fpdf import FPDF
 
-    md = sys.stdin.read().strip()
+    md = sys.stdin.buffer.read().decode("utf-8", errors="replace").strip()
     if not md:
         sys.exit("Pipe the markdown into stdin.")
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
+    family = "Helvetica"
+    fonts = _unicode_fonts()
+    if fonts:  # a real font shows Greek letters, ohm, infinity and similar symbols
+        for style, path in zip(("", "B", "I"), fonts):
+            pdf.add_font("Body", style, path)
+        family = "Body"
+        UNICODE_FONT["on"] = True
     pdf.add_page()
     pdf.set_title(a.title)
 
     link_re = re.compile(r"(\[[^\]]+\]\(https?://[^)\s]+\)|https?://[^\s)]+)")
 
-    def line(txt, size=11, style="", indent=0, font="Helvetica", h=6):
+    def line(txt, size=11, style="", indent=0, font=None, h=6):
+        font = font or family
         pdf.set_font(font, style, size)
         pdf.set_x(pdf.l_margin + indent)
         if font == "Courier" or not link_re.search(txt):
@@ -673,6 +711,83 @@ def cmd_merge(a):
           + (", sources deleted" if a.delete_sources else "") + f". {len(w.pages)} pages.")
 
 
+def cmd_pdfpics(a):
+    """Turn each page of a homework PDF into a picture in Homework/<group>/. The questions are the
+    PDF's own text (no OCR needed for text PDFs), saved to Homework/Questions.md."""
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(a.file)
+    label = safe(a.label or pathlib.Path(a.file).stem)
+    d = sub(a.course, "attachments", a.group)
+    for i in range(len(pdf)):
+        img = pdf[i].render(scale=a.scale).to_pil().convert("RGB")
+        img.save(d / f"{label} p{i + 1:02d}.png", optimize=True)
+    if not a.no_text:
+        from pypdf import PdfReader
+
+        text = "\n".join((p.extract_text() or "") for p in PdfReader(a.file).pages).strip()
+        title = f"{a.group}/{label}" if a.group else label
+        with open(sub(a.course, "attachments") / "Questions.md", "a", encoding="utf-8") as f:
+            f.write(f"## {title}\n\n{text}\n\n")
+    print(f"{label}: {len(pdf)} pictures in {d.relative_to(cdir(a.course)).as_posix()}")
+
+
+def cmd_receive(a):
+    """Run a small server on this PC (127.0.0.1 only). A logged-in browser page sends files and
+    screenshots to it, one at a time, and they land in the vault. Needs the printed token."""
+    import secrets
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlparse
+
+    token = a.token or secrets.token_hex(8)
+    state = {"last": time.time(), "count": 0}
+
+    class Handler(BaseHTTPRequestHandler):
+        timeout = 20  # drop idle or half-open connections (browsers open spare ones)
+
+        def _cors(self):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "*")
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self._cors()
+            self.end_headers()
+
+        def do_POST(self):
+            q = parse_qs(urlparse(self.path).query)
+            if q.get("token", [""])[0] != token:
+                self.send_response(403)
+                self._cors()
+                self.end_headers()
+                return
+            kind = q.get("kind", ["file"])[0]
+            name = safe(q.get("name", ["file"])[0]).lstrip(".") or "file"
+            group = (q.get("group", [""])[0] or "").strip().strip(".") or None
+            data = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            dest = sub(a.course, "attachments" if kind == "shot" else "sources", group) / name
+            dest.write_bytes(data)
+            state["last"] = time.time()
+            state["count"] += 1
+            self.send_response(200)
+            self._cors()
+            self.end_headers()
+            self.wfile.write(b"ok")
+            print(f"saved {dest.relative_to(cdir(a.course)).as_posix()} ({len(data) // 1024} KB)", flush=True)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
+    server.timeout = 2
+    print(f"receiver ready: port {a.port} token {token} (stops after {a.idle}s with no uploads)", flush=True)
+    while time.time() - state["last"] < a.idle:
+        server.handle_request()
+    print(f"receiver stopped after {state['count']} uploads", flush=True)
+
+
 def cmd_finish(a):
     """Last step: remove duplicates, then delete every working file used to build the vault."""
     import shutil
@@ -714,6 +829,18 @@ def main():
     p.add_argument("--monitor", type=int, default=1, help="0 = all screens")
     p.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"))
     p.add_argument("--delay", type=float, default=0)
+
+    p = add("pdfpics", cmd_pdfpics, help="pages of a homework PDF into pictures in Homework/<group>/, plus the question text")
+    p.add_argument("file")
+    p.add_argument("--group", help="subfolder, for example 'Week 3'")
+    p.add_argument("--label", help="picture name prefix (default: the file name)")
+    p.add_argument("--scale", type=float, default=1.4, help="picture size, 1.0 = 72 dpi")
+    p.add_argument("--no-text", action="store_true", help="do not add the text to Questions.md (for solutions)")
+
+    p = add("receive", cmd_receive, help="local server: a logged-in browser page sends files and pictures into the vault")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--idle", type=int, default=900, help="stop after this many seconds with no uploads")
+    p.add_argument("--token", help="secret the page must send (default: random, printed at start)")
 
     p = add("finish", cmd_finish, help="last step: dedupe, then delete all working files used to build the vault")
     p.add_argument("--also-delete", nargs="*", metavar="FILE", help="files this run downloaded elsewhere (for example in Downloads)")

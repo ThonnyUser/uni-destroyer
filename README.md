@@ -34,7 +34,8 @@ The LLM has to read everything it summarises, so a full course uses a lot of tok
 |---|---|
 | One lecture transcript (about 12,000 words) | 16,000 tokens |
 | A course with 18 lectures | 300,000 tokens to read, plus the notes it writes |
-| Reading every lecture-notes file of one course (for example ten PDFs, 393 pages) | 150,000 to 250,000 tokens |
+| Reading every lecture-notes file of one course as text (ten PDFs, 393 slides, about 28,500 words) | about 40,000 tokens |
+| A full course run with outline, lab manual, past exams, notes and re-reads | several hundred thousand tokens |
 | One assignment page, hidden sections opened | 20,000 tokens |
 
 Each step also re-reads the whole conversation, so real usage is higher. **A free plan will probably not work for a whole course.** Use a paid plan or API credit, or run one week at a time. The script itself (captions, OCR, PDF, screenshots) is free and runs on your PC. Only the LLM's reading and writing cost tokens.
