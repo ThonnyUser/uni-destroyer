@@ -450,8 +450,9 @@ def cmd_grab(a):
             videos.setdefault(m.group(1), url)
         p = Links()
         p.feed(html)
+        base = url + "/" if re.search(r"<title>Index of", html) and not url.endswith("/") else url  # a folder listing
         for href in p.found:
-            link = urldefrag(urljoin(url, href))[0]
+            link = urldefrag(urljoin(base, href))[0]
             if not link.startswith("http"):
                 continue
             path = urlparse(link).path.lower()
@@ -715,6 +716,37 @@ def cmd_merge(a):
           + (", sources deleted" if a.delete_sources else "") + f". {len(w.pages)} pages.")
 
 
+def _cut_on_blank(strip, colors, max_px=1800):
+    """Cut a tall picture into parts of about max_px, only on blank rows, so nothing is cut in half."""
+    import numpy as np
+
+    ink = (np.asarray(strip.convert("L")) < 200).any(axis=1)
+    runs, start = [], None  # blank runs: (start, end) of rows with no ink
+    for row, has_ink in enumerate(list(ink) + [True]):
+        if not has_ink and start is None:
+            start = row
+        if has_ink and start is not None:
+            if row - start >= 8:
+                runs.append((start, row))
+            start = None
+    cuts, pos = [0], 0
+    while strip.height - pos > max_px:
+        window = [r for r in runs if pos + 0.4 * max_px <= (r[0] + r[1]) / 2 <= pos + max_px]
+        if not window:
+            window = [r for r in runs if (r[0] + r[1]) / 2 > pos + 0.4 * max_px]  # no gap in reach: take the next one
+        pos = int((max(window, key=lambda r: r[1] - r[0])[0] + max(window, key=lambda r: r[1] - r[0])[1]) / 2) if window else pos + max_px
+        cuts.append(pos)
+    cuts.append(strip.height)
+    for lo, hi in zip(cuts, cuts[1:]):
+        part = strip.crop((0, lo, strip.width, hi))
+        rows = np.asarray(part.convert("L")) < 200
+        used = np.where(rows.any(axis=1))[0]
+        if not len(used):
+            continue
+        part = part.crop((0, max(0, used[0] - 6), part.width, min(part.height, used[-1] + 7)))
+        yield part.quantize(colors=colors) if colors else part
+
+
 def _question_pictures(pdf, scale, colors, keep_chrome, max_px=1800):
     """Pictures of the questions only, never with a circuit cut in half.
     Per page: drop a banner at the top (wide objects touching the top edge, such as a logo bar), a footer
@@ -772,31 +804,7 @@ def _question_pictures(pdf, scale, colors, keep_chrome, max_px=1800):
     for p in pieces:
         strip.paste(p, (0, y))
         y += p.height + gap
-    ink = (np.asarray(strip.convert("L")) < 200).any(axis=1)
-    runs, start = [], None  # blank runs: (start, end) of rows with no ink
-    for row, has_ink in enumerate(list(ink) + [True]):
-        if not has_ink and start is None:
-            start = row
-        if has_ink and start is not None:
-            if row - start >= 8:
-                runs.append((start, row))
-            start = None
-    cuts, pos = [0], 0
-    while strip.height - pos > max_px:
-        window = [r for r in runs if pos + 0.4 * max_px <= (r[0] + r[1]) / 2 <= pos + max_px]
-        if not window:
-            window = [r for r in runs if (r[0] + r[1]) / 2 > pos + 0.4 * max_px]  # no gap in reach: take the next one
-        pos = int((max(window, key=lambda r: r[1] - r[0])[0] + max(window, key=lambda r: r[1] - r[0])[1]) / 2) if window else pos + max_px
-        cuts.append(pos)
-    cuts.append(strip.height)
-    for lo, hi in zip(cuts, cuts[1:]):
-        part = strip.crop((0, lo, strip.width, hi))
-        rows = np.asarray(part.convert("L")) < 200
-        used = np.where(rows.any(axis=1))[0]
-        if not len(used):
-            continue
-        part = part.crop((0, max(0, used[0] - 6), part.width, min(part.height, used[-1] + 7)))
-        yield part.quantize(colors=colors) if colors else part
+    yield from _cut_on_blank(strip, colors, max_px)
 
 
 def cmd_pdfpics(a):
@@ -889,6 +897,82 @@ def cmd_slidepics(a):
             f.write(f"## Slides/{group + '/' if group else ''}{title} (Slides p. {n + 1})\n\n{text}\n\n")
         count += 1
     print(f"{count} slide questions saved as pictures in Homework/Slides")
+
+
+def _headless_shot(target, out, width, height):
+    """Screenshot of a URL or file with headless Edge or Chrome. Returns True if the picture exists."""
+    import subprocess
+    import tempfile
+
+    exe = _browser()
+    if not exe:
+        sys.exit("No Edge or Chrome found.")
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as prof:
+        subprocess.run([exe, "--headless=new", "--disable-gpu", "--hide-scrollbars", f"--user-data-dir={prof}",
+                        "--disable-features=WebContentsForceDark,AutoDarkMode", "--blink-settings=forceDarkModeEnabled=false,preferredColorScheme=0",
+                        "--virtual-time-budget=6000",
+                        f"--window-size={width},{height}", f"--screenshot={out}", target],
+                       timeout=120, capture_output=True)
+        for _ in range(240):
+            if pathlib.Path(out).exists() and pathlib.Path(out).stat().st_size > 0:
+                return True
+            time.sleep(0.5)
+    return False
+
+
+def cmd_webpics(a):
+    """Pictures of the question content of a web page: only the main content, with the site menu,
+    header and footer removed. Long pages are cut only on blank rows. The page text goes to Questions.md."""
+    import tempfile
+    from lxml import html as lh
+    from PIL import Image
+
+    page = _rendered(a.url)
+    if not page:
+        sys.exit("Could not load the page.")
+    root = lh.fromstring(page)
+    node = next(iter(root.xpath(a.xpath)), None)
+    if node is None:
+        sys.exit(f"Nothing matches {a.xpath} on that page. Try --xpath '//body'.")
+    for bad in node.xpath(".//nav|.//header[not(ancestor::section) and not(ancestor::article)]|.//footer|.//script|.//style|.//*[contains(@class,'navbar')]|.//*[contains(@class,'breadcrumb')]|.//button"):
+        bad.getparent().remove(bad)
+    if a.start_at:  # drop the introduction: keep from the first heading that contains this text
+        first = next((h for h in node.xpath(".//h1|.//h2|.//h3|.//h4")
+                      if h.text_content().strip().lower().startswith(a.start_at.lower())), None)
+        if first is not None:
+            cur = first
+            while cur is not node and cur.getparent() is not None:
+                for earlier in list(cur.itersiblings(preceding=True)):
+                    cur.getparent().remove(earlier)
+                cur = cur.getparent()
+    # keep the site's stylesheets, but not its switchable (often dark) theme sheet
+    head = "".join(lh.tostring(e, encoding="unicode")
+                   for e in root.xpath("//head//link[@rel='stylesheet'][not(@id='theme-stylesheet')]|//head//style"))
+    doc = ('<!doctype html><html><head><meta charset="utf-8"><base href="' + a.url + '">' + head
+           + "<style>html:not(#a),body:not(#a),body *:not(#a):not(#b):not(#c){background:#fff !important;color:#111 !important;border-color:#bbb !important;box-shadow:none !important}a{color:#0645ad !important}img,svg{background:transparent !important}body{margin:14px}</style></head><body>" + lh.tostring(node, encoding="unicode") + "</body></html>")
+    group = a.group
+    d = sub(a.course, "attachments", group)
+    label = safe(a.label or pathlib.Path(a.url.rstrip("/")).name or "page")
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        src = pathlib.Path(tmp) / "page.html"
+        src.write_text(doc, encoding="utf-8")
+        shot = pathlib.Path(tmp) / "shot.png"
+        if not _headless_shot(src.as_uri(), shot, a.width, 12000):
+            sys.exit("The browser made no picture.")
+        img = Image.open(shot).convert("RGB")
+    from PIL import ImageChops
+    bbox = ImageChops.difference(img, Image.new("RGB", img.size, img.getpixel((2, 2)))).convert("L").point(lambda v: 255 if v > 40 else 0).getbbox()
+    if not bbox:
+        sys.exit("The picture is blank.")
+    img = img.crop((max(0, bbox[0] - 8), max(0, bbox[1] - 8), min(img.width, bbox[2] + 8), min(img.height, bbox[3] + 8)))
+    count = 0
+    for count, part in enumerate(_cut_on_blank(img, a.colors, a.max_px), 1):
+        part.save(d / f"{label} {count:02d}.png", optimize=True)
+    text = re.sub(r"[ \t]+", " ", node.text_content()).strip()
+    text = re.sub(r"\n\s*\n+", chr(10) * 2, text)
+    with open(sub(a.course, "attachments") / "Questions.md", "a", encoding="utf-8") as f:
+        f.write(f"## {group + '/' if group else ''}{label}" + chr(10) * 2 + text + chr(10) * 2)
+    print(f"{label}: {count} pictures in {d.relative_to(cdir(a.course)).as_posix()}")
 
 
 def cmd_cleanpics(a):
@@ -1038,6 +1122,16 @@ def main():
     p.add_argument("file", help="the merged slides PDF (or any slides PDF)")
     p.add_argument("--groups", help='slide ranges by topic, for example "Topic 1=1-62;Topic 2=63-122"')
     p.add_argument("--scale", type=float, default=1.6)
+    p.add_argument("--colors", type=int, default=64)
+
+    p = add("webpics", cmd_webpics, help="pictures of a web page's question content only (no menu, header, footer)")
+    p.add_argument("url")
+    p.add_argument("--group", help="subfolder in Homework, for example 'Week 3'")
+    p.add_argument("--label", help="picture name (default: last part of the URL)")
+    p.add_argument("--xpath", default="//main", help="which part of the page to keep (default: the main content)")
+    p.add_argument("--start-at", dest="start_at", help="keep from the first heading that starts with this text (drops the page introduction)")
+    p.add_argument("--width", type=int, default=1000)
+    p.add_argument("--max-px", dest="max_px", type=int, default=1800)
     p.add_argument("--colors", type=int, default=64)
 
     p = add("cleanpics", cmd_cleanpics, help="re-crop pictures already in Homework/ (no logos, headers, footers, margins)")

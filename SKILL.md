@@ -54,6 +54,10 @@ Take **one screenshot for every homework page or question**, possibly hundreds, 
 
 **Practice problems in lecture slides.** The Example and Practice problem slides are the main homework. Run `slidepics SLIDES.pdf --course C --groups "Topic 1=1-62;Topic 2=63-122;..."` on the merged slides PDF (take the ranges from the notes course map). For every slide titled "Example n" or "Practice problem n" it saves a picture of the question and the circuit only, in `Homework/Slides/<Topic>/`, named like `Example 1 (Slides p. 69).png`. It keeps the whole question (title, every line of text, and the figure) and removes only the answer box, the page number and the logo. The question text goes to `Questions.md`. Answers stay in the Notes PDF.
 
+**Courses whose homework is web pages (programming courses).** Tutorials, labs, revision and challenge questions are pages on the course site, not PDFs. Run `webpics URL --group "Week N" --label "..."` for every question page, one at a time. It keeps only the main content, forces a light theme, removes the site menu, header and footer, and cuts long pages only on blank rows. Use `--start-at "Exercise"` (the first heading that starts with that text) to drop an introduction full of admin text. Skip pages that are only answers or solutions. Check one picture of each kind before you say it is done.
+
+**Slides that are PDFs inside a folder listing.** Some course sites list their slides as a folder ("Index of /slides/week_1/"). Run `grab FOLDER_URL/ --depth 0` for each week folder (give the URL a trailing slash), then rename the files in lecture order and use `merge`. Say clearly which weeks have no published slides.
+
 **Quizzes.** Take pictures of the quiz information (rules, dates, platform instructions) into `Homework/Quizzes/`. Do **not** start or open a live quiz attempt, and never answer a quiz for the user. Quizzes are often on an external platform behind its own login. If the course outline marks assessments "No Assistance" (no generative AI), say so to the user. This tool is for studying, not for answering assessed work.
 
 **OCR only the question itself:** look at the screenshot, find the question's rectangle, then run `ocr FILE --course C --region X Y W H`. That appends the question text to `Homework/Questions.md`, under the picture's folder and file name. Never OCR a whole page, answers, solutions, menus or page chrome.
@@ -107,6 +111,7 @@ All need `--course <name>`. Each prints the path it wrote. Output goes to the co
 | Screenshot of the screen | `python scripts/hw.py shot --course C --label L [--group "Week 3"] [--region X Y W H] [--delay 3]` |
 | Homework PDF into pictures by week (and its text) | `python scripts/hw.py pdfpics FILE --course C --group "Week 3" --label "Workshop 2"` |
 | Slide Example and Practice problems as pictures (question and circuit only) | `python scripts/hw.py slidepics SLIDES.pdf --course C --groups "Topic 1=1-62;Topic 2=63-122"` |
+| Pictures of a web page's questions only (no menu, header, footer) | `python scripts/hw.py webpics URL --course C --group "Week 3" --label "Lab 03 questions" --start-at "Exercise"` |
 | Re-crop pictures already saved (logos, headers, margins) | `python scripts/hw.py cleanpics --course C [--skip Quizzes]` |
 | OCR the question only | `python scripts/hw.py ocr image.png --course C --region X Y W H` |
 | Video link to transcript | `python scripts/hw.py captions URL --course C --captions-only` |
@@ -128,6 +133,10 @@ Prefer `webshot` over `shot` for web pages. `shot` captures the whole desktop an
 2. **Public page**: run `fetch` or `grab`. If it reports "no text", use your browser tool.
 3. **Crawl the whole site** when the user wants everything: every week, lecture, tutorial, lab, assignment, resource and assessment page. Run `expand.js` on each. Keep a list of visited URLs so you never loop. Stay on the course site.
 4. Find the **lecture notes or slides** for every lecture (step 1 of Notes above). Find the **homework** (labs, tutorials, quizzes, assignments) and the **assessment and exam information**.
+
+## If the official course outline cannot be read
+
+Some sites send the outline to an external page that needs JavaScript and never renders. Do not guess. Take weights, hurdles, dates and exam rules from the first and last lecture slides and the course pages, say where each fact came from, and mark anything you could not confirm `[ambiguous]` or `[not published]`. Tell the user to check the official outline.
 
 ## Workflow: downloading course files (slides, lecture notes)
 
