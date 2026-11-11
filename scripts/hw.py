@@ -715,6 +715,49 @@ def cmd_merge(a):
           + (", sources deleted" if a.delete_sources else "") + f". {len(w.pages)} pages.")
 
 
+def _question_pictures(pdf, scale, colors, keep_chrome):
+    """Yield one picture per page, cropped to the question content only. Headers, footers, logos,
+    page numbers and watermarks are dropped: objects in the top or bottom band that repeat on other
+    pages (or any object in the band of a single-page file), and page-sized background objects."""
+    n = len(pdf)
+    top_band, bottom_band = 0.115, 0.075
+    pages = []
+    for i in range(n):
+        page = pdf[i]
+        w, h = page.get_size()
+        objs = []
+        for obj in page.get_objects(max_depth=1):
+            l, b, r, t = obj.get_bounds()
+            key = (obj.type, round(l / 6), round(b / 6), round(r / 6), round(t / 6))
+            objs.append((key, (l, b, r, t)))
+        pages.append((page, w, h, objs))
+    seen = {}
+    for _, _, _, objs in pages:
+        for key, _ in objs:
+            seen[key] = seen.get(key, 0) + 1
+    for page, w, h, objs in pages:
+        keep = []
+        for key, (l, b, r, t) in objs:
+            in_band = b > h * (1 - top_band) or t < h * bottom_band  # wholly inside the header or footer strip
+            repeated = True
+            background = (r - l) * (t - b) > 0.85 * w * h
+            watermark = (r - l) * (t - b) > 0.5 * w * h and seen[key] >= 2
+            if not keep_chrome and (background or watermark or in_band):
+                continue
+            keep.append((l, b, r, t))
+        img = page.render(scale=scale).to_pil().convert("RGB")
+        if keep:
+            pad = 8
+            l = max(0, min(k[0] for k in keep) - pad)
+            r = min(w, max(k[2] for k in keep) + pad)
+            b = max(0, min(k[1] for k in keep) - pad)
+            t = min(h, max(k[3] for k in keep) + pad)
+            img = img.crop((int(l * scale), int((h - t) * scale), int(r * scale), int((h - b) * scale)))
+        if colors:
+            img = img.quantize(colors=colors)
+        yield img
+
+
 def cmd_pdfpics(a):
     """Turn each page of a homework PDF into a picture in Homework/<group>/. The questions are the
     PDF's own text (no OCR needed for text PDFs), saved to Homework/Questions.md."""
@@ -723,8 +766,7 @@ def cmd_pdfpics(a):
     pdf = pdfium.PdfDocument(a.file)
     label = safe(a.label or pathlib.Path(a.file).stem)
     d = sub(a.course, "attachments", a.group)
-    for i in range(len(pdf)):
-        img = pdf[i].render(scale=a.scale).to_pil().convert("RGB")
+    for i, img in enumerate(_question_pictures(pdf, a.scale, a.colors, a.keep_chrome)):
         img.save(d / f"{label} p{i + 1:02d}.png", optimize=True)
     if not a.no_text:
         from pypdf import PdfReader
@@ -840,6 +882,8 @@ def main():
     p.add_argument("--label", help="picture name prefix (default: the file name)")
     p.add_argument("--scale", type=float, default=1.4, help="picture size, 1.0 = 72 dpi")
     p.add_argument("--no-text", action="store_true", help="do not add the text to Questions.md (for solutions)")
+    p.add_argument("--colors", type=int, default=64, help="limit the picture to this many colours to save space (0 = off)")
+    p.add_argument("--keep-chrome", action="store_true", help="keep headers, footers, logos and watermarks")
 
     p = add("receive", cmd_receive, help="local server: a logged-in browser page sends files and pictures into the vault")
     p.add_argument("--port", type=int, default=8765)

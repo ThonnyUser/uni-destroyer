@@ -65,7 +65,7 @@ Downloads/homework-vault/ELEC1111 Vault/
   ELEC1111 Slides.pdf      every lecture slide merged into one file
   ELEC1111 Notes.pdf       the condensed study guide (about 30 pages): summaries, slide references, YouTube links, practice problems
   ELEC1111 Exam Prep.pdf   exam and test dates, what each covers, what to practice, a countdown timeline
-  Homework/                a folder of homework screenshots, in subfolders by week, plus Questions.md (OCR of the questions only)
+  Homework/                a folder of homework pictures, in subfolders by week, cropped to the questions only (no headers, logos or watermarks), plus Questions.md
   Assignments/             a plan for each take-home assignment (tips, steps, schedule). Empty if the course is all tests
 ```
 
