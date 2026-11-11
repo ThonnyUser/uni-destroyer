@@ -48,6 +48,8 @@ Write every link as `[label](https://...)`. The `pdf` command turns it into a cl
 ### 4. Homework: a folder of pictures, sorted by week (when the user asks for it)
 Take **one screenshot for every homework page or question**, possibly hundreds, each named clearly (`--label q12`). Sort them into subfolders with `--group`: by week when you can (`--group "Week 3"`), otherwise by topic, tutorial, lab or quiz. They land in `Homework/<group>/`. Keep the pictures as files. Do not merge them into a PDF.
 
+**Standard homework recipe, in this order:** (1) `slidepics` on the merged slides, for the lecture Example and Practice problems; (2) `pdfpics` on every workshop, tutorial and problem-set PDF, one at a time; (3) screenshots with `--region` OCR only when something exists only on a web page. Check one picture of each kind yourself before you say it is done: no logo, banner, answer or page number, and no circuit cut in half.
+
 **Where homework comes from.** Look for workshop sheets, tutorials, problem sets and quizzes in every topic section. For a homework PDF, download it (one file at a time, see below) and run `pdfpics FILE --course C --group "Week 3" --label "Workshop 2"`. It turns every page into a picture in `Homework/<group>/`, cropped to the question content only: banners, headers, footers, logos, page numbers and watermarks are removed. All pages are joined into one strip and cut only on blank rows, so a circuit that a page break split in two is whole again and no circuit is ever cut in half, and the picture is limited to 64 colours to save space (about 70% smaller). `--keep-chrome` keeps everything, `--colors 0` turns the colour limit off. For pictures already saved uncropped, run `cleanpics --course C [--skip Quizzes] [--only text] [--top 0.115 --bottom 0.075]` once: it cuts the header and footer strips, a leftover header fragment above the header rule, and the white margins in place and saves the PDF's own text under the same name in `Questions.md`, so no OCR is needed for text PDFs. Group by the teaching week the work belongs to (use the course schedule: topic numbers and week numbers can differ). Do not picture PDFs that are only solutions: use `--no-text` or skip them.
 
 **Practice problems in lecture slides.** The Example and Practice problem slides are the main homework. Run `slidepics SLIDES.pdf --course C --groups "Topic 1=1-62;Topic 2=63-122;..."` on the merged slides PDF (take the ranges from the notes course map). For every slide titled "Example n" or "Practice problem n" it saves a picture of the question and the circuit only, in `Homework/Slides/<Topic>/`, named like `Example 1 (Slides p. 69).png`. It keeps the whole question (title, every line of text, and the figure) and removes only the answer box, the page number and the logo. The question text goes to `Questions.md`. Answers stay in the Notes PDF.
@@ -84,7 +86,7 @@ If there are assignments, write a plan for **each** one with `pdf --course C --t
 2. Install the packages:
 
 ```bash
-pip install rapidocr-onnxruntime pillow mss trafilatura lxml_html_clean yt-dlp fpdf2 pypdf faster-whisper sounddevice numpy python-pptx
+pip install rapidocr-onnxruntime pillow mss trafilatura lxml_html_clean yt-dlp fpdf2 pypdf pypdfium2 faster-whisper sounddevice numpy python-pptx
 ```
 
 Install only what the task needs: `fpdf2` PDFs, `pypdf` slides and merging, `rapidocr-onnxruntime pillow` OCR, `yt-dlp` video captions, `trafilatura lxml_html_clean` fetching, `faster-whisper` only for videos with no captions and no notes.
@@ -103,6 +105,8 @@ All need `--course <name>`. Each prints the path it wrote. Output goes to the co
 | Picture of a web page (page only) | `python scripts/hw.py webshot URL --course C --label L [--group "Week 3"]` (headless Edge or Chrome) |
 | Screenshot of the screen | `python scripts/hw.py shot --course C --label L [--group "Week 3"] [--region X Y W H] [--delay 3]` |
 | Homework PDF into pictures by week (and its text) | `python scripts/hw.py pdfpics FILE --course C --group "Week 3" --label "Workshop 2"` |
+| Slide Example and Practice problems as pictures (question and circuit only) | `python scripts/hw.py slidepics SLIDES.pdf --course C --groups "Topic 1=1-62;Topic 2=63-122"` |
+| Re-crop pictures already saved (logos, headers, margins) | `python scripts/hw.py cleanpics --course C [--skip Quizzes]` |
 | OCR the question only | `python scripts/hw.py ocr image.png --course C --region X Y W H` |
 | Video link to transcript | `python scripts/hw.py captions URL --course C --captions-only` |
 | Auto-correct a transcript | `python scripts/hw.py fixcaptions transcript.txt --course C` |
@@ -126,7 +130,7 @@ Prefer `webshot` over `shot` for web pages. `shot` captures the whole desktop an
 
 ## Workflow: downloading course files (slides, lecture notes)
 
-1. **One file at a time.** Use `scripts/download.js` in the logged-in page (it saves to the browser's Downloads folder and finds the real file behind Moodle "resource" links). Name every download starting with `hwtmp`, so `finish --also-delete hwtmp*` can remove them. Download each file in its own step: one request, then check that the file arrived (name and size) before the next. Never run a loop that downloads many files in one call: browsers time out, ask "allow multiple downloads", or silently drop files. If the browser asks to allow multiple downloads, ask the user to click Allow, then continue.
+1. **One file at a time.** Use `scripts/download.js` in the logged-in page (it saves to the browser's Downloads folder and finds the real file behind Moodle "resource" links). If the browser tab stops responding (a frozen tab or a hidden prompt), open a new tab on the course page and carry on there, and tell the user to check Chrome for a prompt. Name every download starting with `hwtmp`, so `finish --also-delete hwtmp*` can remove them. Download each file in its own step: one request, then check that the file arrived (name and size) before the next. Never run a loop that downloads many files in one call: browsers time out, ask "allow multiple downloads", or silently drop files. If the browser asks to allow multiple downloads, ask the user to click Allow, then continue.
 2. Name files clearly: `<COURSE> <NN> <title>`, for example `ELEC1111 03 Topic 2 - Lecture Notes.pdf`, so they sort in course order. Leave them where they land. `merge` reads them, and `finish` deletes them.
 3. Remove duplicates and make one file: `merge` joins PDFs in order into one PDF named after the course, with a bookmark per source file, and skips exact duplicates. Add `--delete-dupes` to delete duplicate files. Ask the user before `--delete-sources`, which deletes the single files after merging.
 

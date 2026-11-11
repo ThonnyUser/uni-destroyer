@@ -52,7 +52,7 @@ This tool helps you organise and understand your own study material. For assignm
 
 1. **Install Python 3.12** from https://www.python.org/downloads/ . On Windows, tick "Add python.exe to PATH" in the installer. Check with `python --version`.
 2. Copy this folder into your agent's skills folder (for Claude Code: `~/.claude/skills/homework-vault/`).
-3. Install the packages: `pip install rapidocr-onnxruntime pillow mss trafilatura lxml_html_clean yt-dlp fpdf2 pypdf faster-whisper sounddevice numpy python-pptx`
+3. Install the packages: `pip install rapidocr-onnxruntime pillow mss trafilatura lxml_html_clean yt-dlp fpdf2 pypdf pypdfium2 faster-whisper sounddevice numpy python-pptx`
 4. Optional: set `HW_VAULT` to use another output folder. By default everything goes to `Downloads/homework-vault/<course>/`.
 5. **Only for pages behind a login** (Moodle, Canvas, Blackboard): your agent needs a browser tool that uses your own sign-ins, such as the [Claude in Chrome extension](https://chromewebstore.google.com/detail/fcoeoabgfenejglbffodgkkbkcdhcgfn). Sign in to the site in Chrome first. Public pages, downloads and the `grab` command need no extra tool.
 
