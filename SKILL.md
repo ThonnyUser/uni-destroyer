@@ -138,6 +138,15 @@ Prefer `webshot` over `shot` for web pages. `shot` captures the whole desktop an
 
 `python scripts/hw.py receive --course C` starts a small server on 127.0.0.1 and prints a token. `scripts/send.js` lets a logged-in page post files and pictures to it. Chrome may block this until the user allows access to the local network, and in testing the prompt blocked the page. If the page's request hangs, stop and use `scripts/download.js` instead.
 
+## When a course has no slides or notes
+
+Never make up slides. If there are no lecture slides or notes:
+- Do not create `<COURSE> Slides.pdf` (leave it out and say so), and do not write "Slides p." references.
+- Build the Notes from the lecture transcripts. Use the default free captions (`captions URL --captions-only`) unless the user asks for Whisper. Cite where each point comes from by lecture name, and give a timestamp if the transcript has one.
+- Treat auto-captions as about nine words in ten right: technical words, names, numbers and formulas are the weak part. Run `fixcaptions`, mark every doubtful number, formula or term `[ambiguous]`, and never fill a gap with a guess.
+- Say clearly in the Notes that they come from captions, not from the lecturer's slides.
+- Practice problems: use only problems the lecturer actually states in the transcript, and label problems you write yourself as extra.
+
 ## Workflow: videos (only when there are no notes)
 
 Run `captions URL --captions-only` for each. Expect "HTTP 429" from YouTube; the script retries with waits. Then run `fixcaptions` and correct the text (next section). Transcribe audio with `faster-whisper` only if the user allows the large download.
