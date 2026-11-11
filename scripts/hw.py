@@ -778,6 +778,42 @@ def cmd_pdfpics(a):
     print(f"{label}: {len(pdf)} pictures in {d.relative_to(cdir(a.course)).as_posix()}")
 
 
+def cmd_cleanpics(a):
+    """Re-crop pictures already in Homework/: drop the header and footer strips (logos, page numbers)
+    and the white margins, and limit the colours. Changes the files in place. Run it once per picture."""
+    from PIL import Image, ImageChops
+
+    root = sub(a.course, "attachments")
+    done = 0
+    before = after = 0
+    for p in sorted(root.rglob("*.png")):
+        if any(skip in p.relative_to(root).parts for skip in (a.skip or [])):
+            continue
+        if a.only and a.only not in p.relative_to(root).as_posix():
+            continue
+        before += p.stat().st_size
+        im = Image.open(p).convert("RGB")
+        w, h = im.size
+        im = im.crop((0, int(h * a.top), w, h - int(h * a.bottom)))
+        dark = ImageChops.invert(im.convert("L")).point(lambda v: 255 if v > 40 else 0)
+        for y in range(min(60, dark.height)):  # a wide line near the top is the header rule: cut it and what is above it
+            row = dark.crop((0, y, dark.width, y + 1)).histogram()[255]
+            if row > 0.75 * dark.width:
+                im = im.crop((0, y + 2, im.width, im.height))
+                dark = dark.crop((0, y + 2, dark.width, dark.height))
+                break
+        ink = dark.getbbox()
+        if ink:
+            pad = 8
+            im = im.crop((max(0, ink[0] - pad), max(0, ink[1] - pad), min(im.width, ink[2] + pad), min(im.height, ink[3] + pad)))
+        if a.colors:
+            im = im.quantize(colors=a.colors)
+        im.save(p, optimize=True)
+        after += p.stat().st_size
+        done += 1
+    print(f"{done} pictures re-cropped, {before // 1024} KB -> {after // 1024} KB")
+
+
 def cmd_receive(a):
     """Run a small server on this PC (127.0.0.1 only). A logged-in browser page sends files and
     screenshots to it, one at a time, and they land in the vault. Needs the printed token."""
@@ -884,6 +920,13 @@ def main():
     p.add_argument("--no-text", action="store_true", help="do not add the text to Questions.md (for solutions)")
     p.add_argument("--colors", type=int, default=64, help="limit the picture to this many colours to save space (0 = off)")
     p.add_argument("--keep-chrome", action="store_true", help="keep headers, footers, logos and watermarks")
+
+    p = add("cleanpics", cmd_cleanpics, help="re-crop pictures already in Homework/ (no logos, headers, footers, margins)")
+    p.add_argument("--top", type=float, default=0.115, help="share of the height to cut from the top")
+    p.add_argument("--bottom", type=float, default=0.075, help="share of the height to cut from the bottom")
+    p.add_argument("--colors", type=int, default=64)
+    p.add_argument("--skip", nargs="*", metavar="FOLDER", help="subfolders to leave alone, for example Quizzes")
+    p.add_argument("--only", help="only pictures whose path contains this text")
 
     p = add("receive", cmd_receive, help="local server: a logged-in browser page sends files and pictures into the vault")
     p.add_argument("--port", type=int, default=8765)
