@@ -86,7 +86,8 @@ If there are assignments, write a plan for **each** one with `pdf --course C --t
 2. Install the packages:
 
 ```bash
-pip install rapidocr-onnxruntime pillow mss trafilatura lxml_html_clean yt-dlp fpdf2 pypdf pypdfium2 faster-whisper sounddevice numpy python-pptx
+pip install pillow numpy pypdf pypdfium2 fpdf2 trafilatura lxml_html_clean yt-dlp rapidocr-onnxruntime
+# optional: mss python-pptx faster-whisper sounddevice
 ```
 
 Install only what the task needs: `fpdf2` PDFs, `pypdf` slides and merging, `rapidocr-onnxruntime pillow` OCR, `yt-dlp` video captions, `trafilatura lxml_html_clean` fetching, `faster-whisper` only for videos with no captions and no notes.
