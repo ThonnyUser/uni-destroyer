@@ -778,6 +778,87 @@ def cmd_pdfpics(a):
     print(f"{label}: {len(pdf)} pictures in {d.relative_to(cdir(a.course)).as_posix()}")
 
 
+def cmd_slidepics(a):
+    """Pictures of the practice problems in lecture slides: the question text and the circuit only.
+    Finds slides titled 'Example n' or 'Practice problem n', then drops the title, the worked-solution
+    note, the answer box, the page number and the logo. Question text goes to Homework/Questions.md."""
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(a.file)
+    groups = []
+    for part in (a.groups or "").split(";"):
+        if "=" in part:
+            name, rng = part.split("=")
+            lo, hi = rng.split("-")
+            groups.append((name.strip(), int(lo), int(hi)))
+    title_re = re.compile(r"^\s*((?:Example|Practice problem)\s*\d+)\s*$", re.I)
+    qfile = sub(a.course, "attachments") / "Questions.md"
+    count = 0
+    for n in range(len(pdf)):
+        page = pdf[n]
+        w, h = page.get_size()
+        tp = page.get_textpage()
+        lines = [x.strip() for x in tp.get_text_range().splitlines() if x.strip()]
+        if not lines or not title_re.match(lines[0]) or "solution" in lines[0].lower():
+            continue
+        title = re.sub(r"\s+", " ", title_re.match(lines[0]).group(1)).strip().capitalize()
+        objs = [(o, o.get_bounds()) for o in page.get_objects(max_depth=1)]
+        drop = set()
+
+        def box_of(word):
+            hit = tp.search(word).get_next()
+            return tp.get_charbox(hit[0]) if hit else None
+
+        for i, (o, (l, b, r, t)) in enumerate(objs):
+            if (r - l) * (t - b) > 0.85 * w * h or b > h * 0.87:  # background, slide title
+                drop.add(i)
+            if l > w * 0.85 and t < h * 0.16:  # logo and page number in the bottom-right corner
+                drop.add(i)
+        ans = box_of("Answer")
+        if ans:  # the box that holds the answer, and everything inside it
+            holders = [bd for i, (o, bd) in enumerate(objs)
+                       if o.type == 2 and i not in drop and bd[0] <= ans[0] + 2 and bd[1] <= ans[1] + 2
+                       and bd[2] >= ans[2] - 2 and bd[3] >= ans[3] - 2 and (bd[2] - bd[0]) * (bd[3] - bd[1]) < 0.6 * w * h]
+            area = min(holders, key=lambda bd: (bd[2] - bd[0]) * (bd[3] - bd[1])) if holders else (ans[0] - 4, 0, w, ans[3] + 4)
+            for i, (o, (l, b, r, t)) in enumerate(objs):
+                if l >= area[0] - 3 and b >= area[1] - 3 and r <= area[2] + 3 and t <= area[3] + 3:
+                    drop.add(i)
+        note = box_of("Worked solutions")  # painted over below, because it shares a text object with the question
+        keep = [bd for i, (o, bd) in enumerate(objs) if i not in drop]
+        if not keep:
+            continue
+        pad = 10
+        l = max(0, min(k[0] for k in keep) - pad)
+        r = min(w, max(k[2] for k in keep) + pad)
+        b = max(0, min(k[1] for k in keep) - pad)
+        t = min(h, max(k[3] for k in keep) + pad)
+        img = page.render(scale=a.scale).to_pil().convert("RGB")
+        if note:  # white out the "(Worked solutions of examples ...)" line, but not any figure on the same rows
+            from PIL import ImageDraw
+
+            y0, y1 = note[1] - 3, note[3] + 3
+            x_end = w
+            for k, (o, (ol, ob, orr, ot)) in enumerate(objs):
+                if o.type != 1 and k not in drop and ob < y1 and ot > y0 and orr - ol < 0.85 * w:
+                    x_end = min(x_end, ol - 2)
+            ImageDraw.Draw(img).rectangle([0, int((h - y1) * a.scale), int(x_end * a.scale), int((h - y0) * a.scale)], fill="white")
+        img = img.crop((int(l * a.scale), int((h - t) * a.scale), int(r * a.scale), int((h - b) * a.scale)))
+        if a.colors:
+            img = img.quantize(colors=a.colors)
+        group = next((g[0] for g in groups if g[1] <= n + 1 <= g[2]), None)
+        d = sub(a.course, "attachments", "Slides")
+        if group:
+            d = d / safe(group)
+            d.mkdir(parents=True, exist_ok=True)
+        img.save(d / f"{title} (Slides p. {n + 1}).png", optimize=True)
+        text = re.sub(r"\s+", " ", tp.get_text_bounded(l, b, r, t)).strip()
+        text = re.sub(r"\(Worked solutions.*?\)", "", text).strip()
+        with open(qfile, "a", encoding="utf-8") as f:
+            f.write(f"## Slides/{group + '/' if group else ''}{title} (Slides p. {n + 1})\n\n{text}\n\n")
+        count += 1
+    print(f"{count} slide questions saved as pictures in Homework/Slides")
+
+
 def cmd_cleanpics(a):
     """Re-crop pictures already in Homework/: drop the header and footer strips (logos, page numbers)
     and the white margins, and limit the colours. Changes the files in place. Run it once per picture."""
@@ -920,6 +1001,12 @@ def main():
     p.add_argument("--no-text", action="store_true", help="do not add the text to Questions.md (for solutions)")
     p.add_argument("--colors", type=int, default=64, help="limit the picture to this many colours to save space (0 = off)")
     p.add_argument("--keep-chrome", action="store_true", help="keep headers, footers, logos and watermarks")
+
+    p = add("slidepics", cmd_slidepics, help="pictures of the Example and Practice problems in lecture slides (question and circuit only)")
+    p.add_argument("file", help="the merged slides PDF (or any slides PDF)")
+    p.add_argument("--groups", help='slide ranges by topic, for example "Topic 1=1-62;Topic 2=63-122"')
+    p.add_argument("--scale", type=float, default=1.6)
+    p.add_argument("--colors", type=int, default=64)
 
     p = add("cleanpics", cmd_cleanpics, help="re-crop pictures already in Homework/ (no logos, headers, footers, margins)")
     p.add_argument("--top", type=float, default=0.115, help="share of the height to cut from the top")
