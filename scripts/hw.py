@@ -636,6 +636,10 @@ def cmd_pdf(a):
             line("- " + s.strip()[2:], indent=4 + n * 2)
         elif s.startswith("> "):
             line(s[2:], style="I", indent=4)
+        elif re.fullmatch(r"-{3,}", s.strip()):  # markdown rule: a thin line, not the dashes as text
+            pdf.ln(1)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+            pdf.ln(3)
         elif not s.strip():
             pdf.ln(2)
         else:
